@@ -23,9 +23,13 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 # Copy nginx configuration
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Expose port 80
-EXPOSE 80
+# Copy entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-# Start nginx
-CMD ["nginx", "-g", "daemon off;"]
+# Expose port (Cloud Run will set PORT env var)
+EXPOSE 8080
+
+# Start nginx with entrypoint script
+ENTRYPOINT ["/entrypoint.sh"]
 
