@@ -39,7 +39,7 @@ const TemplatesView: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Template Cubbo */}
+                {/* Template Yoobe */}
                 <div className="border border-gray-200 rounded-lg p-5 flex flex-col">
                     <h4 className="text-lg font-semibold text-gray-800">1. Relatório de Rastreio (Track Report)</h4>
                     <p className="text-sm text-gray-500 mt-1 flex-grow">Este arquivo lista todos os pedidos que devem ser faturados para um cliente, servindo como a "fonte da verdade".</p>

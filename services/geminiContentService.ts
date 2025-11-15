@@ -34,15 +34,25 @@ export const generateBillingExplanationContent = async (): Promise<string> => {
     }
 
     const prompt = `
-        Crie um texto explicativo claro e profissional em português do Brasil sobre como funcionam as cobranças mensais em um sistema de logística.
+        Crie um texto explicativo claro e profissional em português do Brasil sobre como funcionam as cobranças mensais em um sistema de logística da Yoobe.
         
         O texto deve explicar:
         1. Cobranças de envios - como são calculadas e quando são aplicadas
         2. Cobranças de armazenagem - como o espaço ocupado é medido e cobrado
         3. Cobranças de adicionais - quando e por que custos adicionais são aplicados
+        4. Entrada de material externo - quando este custo é aplicado (quando a produção não é feita pela Yoobe) e que quando o produto é providenciado pela Yoobe este custo não é cobrado
         
         O texto deve ser direto, fácil de entender para departamentos de compras, e destacar a transparência do processo.
+        Use o nome "Yoobe" ao se referir à empresa.
         Use no máximo 500 palavras.
+        
+        **IMPORTANTE - Formato do Conteúdo:**
+        - NÃO inclua assinaturas, saudações finais (como "Atenciosamente", "Cordialmente", etc.)
+        - NÃO use placeholders como [Seu Nome], [Nome da Empresa], [Seu Contato], [Email], etc.
+        - NÃO inclua informações de contato ou dados fictícios
+        - O conteúdo deve ser puramente informativo e terminar diretamente após a explicação
+        - Use apenas informações reais da Yoobe quando necessário
+        - O texto deve ser autocontido e completo, sem necessidade de fechamentos formais
     `;
 
     try {
@@ -87,11 +97,19 @@ export const generateDIFALExplanation = async (): Promise<string> => {
         1. O que é o DIFAL e por que existe
         2. Como é calculado no processo de envio
         3. Quando é aplicado (origem e destino)
-        4. Como a Cubbo processa e cobra o DIFAL de forma transparente
+        4. Como a Yoobe processa e cobra o DIFAL de forma transparente
         5. Como aparece nas notas fiscais de envio
         
         O texto deve ser técnico mas acessível, adequado para departamentos de compras e contabilidade.
         Use no máximo 600 palavras.
+        
+        **IMPORTANTE - Formato do Conteúdo:**
+        - NÃO inclua assinaturas, saudações finais (como "Atenciosamente", "Cordialmente", etc.)
+        - NÃO use placeholders como [Seu Nome], [Nome da Empresa], [Seu Contato], [Email], etc.
+        - NÃO inclua informações de contato ou dados fictícios
+        - O conteúdo deve ser puramente informativo e terminar diretamente após a explicação
+        - Use apenas informações reais da Yoobe quando necessário
+        - O texto deve ser autocontido e completo, sem necessidade de fechamentos formais
     `;
 
     try {
@@ -110,7 +128,7 @@ export const generateDIFALExplanation = async (): Promise<string> => {
 
 **Como funciona**: Quando um produto é enviado de um estado para outro, e as alíquotas de ICMS são diferentes, o DIFAL é calculado para compensar essa diferença. O estado de destino recebe a parte que lhe cabe do imposto.
 
-**No processo da Cubbo**: 
+**No processo da Yoobe**: 
 - Calculamos o DIFAL automaticamente para cada envio baseado na origem (nossa localização) e destino (CEP do cliente final)
 - O valor é incluído na nota fiscal de envio de forma transparente
 - A cobrança aparece separadamente na fatura mensal, permitindo rastreabilidade completa
@@ -127,23 +145,51 @@ export const generateCalculatorInsights = async (
     palletsUsados: number,
     binsUsados: number,
     valorSeguro: number,
-    custoTotal: number
+    custoTotal: number,
+    quantidadeEntradaMaterial?: number,
+    custoEntradaMaterial?: number
 ): Promise<string> => {
+    const entradaMaterialText = quantidadeEntradaMaterial && quantidadeEntradaMaterial > 0
+        ? `- Quantidade de entrada de material: ${quantidadeEntradaMaterial}
+        - Custo de entrada de material: R$ ${(custoEntradaMaterial || 0).toFixed(2)}`
+        : '';
+
+    const entradaMaterialContext = quantidadeEntradaMaterial && quantidadeEntradaMaterial > 0
+        ? `\n\nIMPORTANTE - Contexto sobre Entrada de Material Externo:
+        O custo de entrada de material externo ocorre quando a produção não é realizada pela Yoobe. 
+        Quando o produto é providenciado pela Yoobe, este custo não é cobrado, pois a integração elimina 
+        a necessidade de processamento manual de entrada. Ao gerar insights sobre este custo, mencione 
+        de forma sutil e profissional que considerar a produção pela Yoobe pode eliminar este custo 
+        adicional e otimizar a operação logística. Seja educado e não insista, apenas sugira como uma 
+        oportunidade de otimização.`
+        : '';
+
     const prompt = `
-        Com base nos seguintes dados de cálculo de custos de logística:
+        Você é um consultor especializado em logística da Yoobe. Com base nos seguintes dados de cálculo de custos de logística:
         - Quantidade em estoque: ${quantidadeEstoque}
         - Pallets usados: ${palletsUsados}
         - Bins usados: ${binsUsados}
         - Valor do seguro: R$ ${valorSeguro.toFixed(2)}
+        ${entradaMaterialText}
         - Custo total estimado: R$ ${custoTotal.toFixed(2)}
+        ${entradaMaterialContext}
         
         Gere insights úteis e sugestões em português do Brasil (máximo 200 palavras) sobre:
         1. Otimizações possíveis no uso de espaço
         2. Comparação com médias do setor (se aplicável)
         3. Dicas para reduzir custos de armazenagem
         4. Observações sobre o seguro
+        ${quantidadeEntradaMaterial && quantidadeEntradaMaterial > 0 ? '5. Sobre custos de entrada de material externo: explique que este custo ocorre quando a produção não é feita pela Yoobe, e que quando o produto é providenciado pela Yoobe este custo não é cobrado. Sugira sutilmente considerar produção pela Yoobe para eliminar este custo adicional.' : ''}
         
-        Seja objetivo e prático.
+        Seja objetivo, prático e profissional. Use o nome "Yoobe" ao se referir à empresa.
+        
+        **IMPORTANTE - Formato do Conteúdo:**
+        - NÃO inclua assinaturas, saudações finais (como "Atenciosamente", "Cordialmente", etc.)
+        - NÃO use placeholders como [Seu Nome], [Nome da Empresa], [Seu Contato], [Email], etc.
+        - NÃO inclua informações de contato ou dados fictícios
+        - O conteúdo deve ser apenas insights e sugestões práticas, terminando diretamente após os insights
+        - Use apenas informações reais da Yoobe quando necessário
+        - O texto deve ser autocontido e completo, sem necessidade de fechamentos formais
     `;
 
     try {
@@ -155,9 +201,13 @@ export const generateCalculatorInsights = async (
         return response.text;
     } catch (error) {
         console.error('Error generating calculator insights:', error);
+        const entradaMaterialFallback = quantidadeEntradaMaterial && quantidadeEntradaMaterial > 0
+            ? `\n\n**Sobre Entrada de Material Externo**: O custo de entrada de material externo (R$ ${(custoEntradaMaterial || 0).toFixed(2)}) ocorre quando a produção não é realizada pela Yoobe. Quando o produto é providenciado pela Yoobe, este custo não é cobrado, pois a integração elimina a necessidade de processamento manual. Considere avaliar a possibilidade de produção pela Yoobe para eliminar este custo adicional e otimizar sua operação logística.`
+            : '';
+
         return `Com base nos valores informados, o custo total estimado é de R$ ${custoTotal.toFixed(2)}. 
         
-Para otimizar custos, considere revisar a organização do estoque para maximizar o uso de pallets e reduzir bins quando possível. O seguro representa uma proteção importante para seus produtos durante o armazenamento.`;
+Para otimizar custos, considere revisar a organização do estoque para maximizar o uso de pallets e reduzir bins quando possível. O seguro representa uma proteção importante para seus produtos durante o armazenamento.${entradaMaterialFallback}`;
     }
 };
 

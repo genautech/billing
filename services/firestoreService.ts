@@ -866,6 +866,55 @@ export const getCustosAdicionaisByCobrancaId = async (cobrancaId: string): Promi
     return snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as CustoAdicional));
 };
 
+// --- Helper function to extract storage quantities from last invoice ---
+export const getLastInvoiceStorageQuantities = async (clienteId: string): Promise<{ pallets: number; bins: number; prateleiras?: number }> => {
+    try {
+        // Get all invoices for the client, sorted by date (most recent first)
+        const cobrancas = await getCobrancasMensais(clienteId);
+        if (cobrancas.length === 0) {
+            return { pallets: 0, bins: 0, prateleiras: 0 };
+        }
+
+        // Get the most recent invoice
+        const lastInvoice = cobrancas.sort((a, b) => new Date(b.dataVencimento).getTime() - new Date(a.dataVencimento).getTime())[0];
+        
+        // Get details from the last invoice
+        const detalhes = await getDetalhesByCobrancaId(lastInvoice.id);
+        
+        // Get price table to identify storage items
+        const tabelaPrecos = await getTabelaPrecos(clienteId);
+        
+        let pallets = 0;
+        let bins = 0;
+        let prateleiras = 0;
+
+        detalhes.forEach(detalhe => {
+            if (!detalhe.tabelaPrecoItemId) return;
+            
+            const itemPreco = tabelaPrecos.find(p => p.id === detalhe.tabelaPrecoItemId);
+            if (!itemPreco || itemPreco.categoria !== 'Armazenamento') return;
+
+            const descricaoLower = itemPreco.descricao.toLowerCase();
+            const metricaLower = itemPreco.metrica.toLowerCase();
+
+            // Identify pallets, bins, or prateleiras by description/metric
+            if (descricaoLower.includes('pallet') || metricaLower.includes('pallet')) {
+                pallets += detalhe.quantidade;
+            } else if (descricaoLower.includes('bin') || metricaLower.includes('bin')) {
+                bins += detalhe.quantidade;
+            } else if (descricaoLower.includes('prateleira') || metricaLower.includes('prateleira') || 
+                       descricaoLower.includes('caixa') || metricaLower.includes('caixa')) {
+                prateleiras += detalhe.quantidade;
+            }
+        });
+
+        return { pallets, bins, prateleiras };
+    } catch (error) {
+        console.error('Error getting last invoice storage quantities:', error);
+        return { pallets: 0, bins: 0, prateleiras: 0 };
+    }
+};
+
 export const confirmarRecebimentoFatura = async (cobrancaId: string) => {
     const docRef = cobrancasCol.doc(cobrancaId);
     return await docRef.update({ 
@@ -2007,8 +2056,22 @@ const generatePromptForAnalysis = (cobranca: CobrancaMensal, detalhes: DetalheEn
         `;
     }
 
+    // Verificar se há custos de entrada de material externo
+    const temEntradaMaterial = detalhes.some(d => {
+        const item = tabelaPrecos.find(c => c.id === d.tabelaPrecoItemId);
+        return item && item.categoria === 'Maquila/Entrada de material externo';
+    });
+
+    const entradaMaterialContext = temEntradaMaterial ? `
+        **Contexto sobre Entrada de Material Externo:**
+        Se houver custos de "Entrada de Material" ou "Maquila/Entrada de material externo" na fatura, explique que:
+        - Este custo ocorre quando a produção não é realizada pela Yoobe
+        - Quando o produto é providenciado pela Yoobe, este custo não é cobrado, pois a integração elimina a necessidade de processamento manual
+        - Seja sutil ao mencionar que considerar produção pela Yoobe pode eliminar este custo adicional, mas não insista - apenas sugira como uma oportunidade de otimização
+        ` : '';
+
     return `
-        Você é um analista financeiro especializado em logística. Analise a seguinte fatura para o cliente "${cliente.nome}" referente a ${cobranca.mesReferencia}.
+        Você é um analista financeiro especializado em logística da Yoobe. Analise a seguinte fatura para o cliente "${cliente.nome}" referente a ${cobranca.mesReferencia}.
 
         Dados da Fatura:
         - Valor Total: R$ ${cobranca.valorTotal.toFixed(2)}
@@ -2024,6 +2087,8 @@ const generatePromptForAnalysis = (cobranca: CobrancaMensal, detalhes: DetalheEn
         ${detailsSummary}
         ${detalhes.length > 15 ? `\n... e mais ${detalhes.length - 15} outros itens.` : ''}
 
+        ${entradaMaterialContext}
+
         ${specialInstructions}
 
         **Instruções Importantes:**
@@ -2031,6 +2096,7 @@ const generatePromptForAnalysis = (cobranca: CobrancaMensal, detalhes: DetalheEn
         - Foque apenas nos valores da fatura e nos componentes do custo que são relevantes para o cliente.
         - Seja claro, objetivo e profissional. Use linguagem simples e acessível.
         - Não invente dados que não foram fornecidos.
+        - Use o nome "Yoobe" ao se referir à empresa.
 
         Sua tarefa é gerar um resumo conciso e informativo para o cliente, em português do Brasil, usando markdown.
         O resumo deve:
@@ -2043,6 +2109,14 @@ const generatePromptForAnalysis = (cobranca: CobrancaMensal, detalhes: DetalheEn
         7.  Finalizar com uma nota positiva.
 
         **IMPORTANTE:** Não mencione templates, margem de lucro, matching dinâmico, ou qualquer detalhe técnico do sistema. Foque apenas na análise da fatura e nos valores apresentados. Quando mencionar custos de envio por estado, explique de forma clara e útil para o cliente entender a distribuição geográfica dos seus envios. Quando mencionar custos de itens adicionais, explique de forma simples que é um custo por item extra no pacote.
+        
+        **IMPORTANTE - Formato do Conteúdo:**
+        - NÃO inclua assinaturas formais (como "Atenciosamente", "Cordialmente", etc.)
+        - NÃO use placeholders como [Seu Nome], [Nome da Empresa], [Seu Contato], [Email], etc.
+        - NÃO inclua informações de contato ou dados fictícios
+        - O conteúdo deve ser apenas a análise da fatura, terminando diretamente após a nota positiva final
+        - Use apenas informações reais da Yoobe quando necessário
+        - O texto deve ser autocontido e completo, sem necessidade de fechamentos formais ou assinaturas
     `;
 };
 
@@ -2193,6 +2267,12 @@ export const seedInitialFaqs = async () => {
         3. O que significa "Confirmar Recebimento da Fatura".
         4. Como exportar os dados para CSV e para que serve.
         5. O que fazer se houver uma divergência na fatura.
+
+        **IMPORTANTE - Formato das Respostas:**
+        - NÃO inclua assinaturas, saudações finais, ou placeholders como [Seu Nome], [Nome da Empresa], [Seu Contato], [Email], etc.
+        - NÃO inclua informações de contato ou dados fictícios
+        - As respostas devem ser puramente informativas e diretas
+        - Use apenas informações reais da Yoobe quando necessário
 
         Responda ESTRITAMENTE no formato JSON, como definido no schema abaixo. Não adicione nenhum texto ou formatação fora do JSON.
     `;

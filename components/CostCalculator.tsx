@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { TabelaPrecoItem, Cliente } from '../types';
-import { getTabelaPrecos } from '../services/firestoreService';
+import { getTabelaPrecos, getLastInvoiceStorageQuantities } from '../services/firestoreService';
 import { generateCalculatorInsights } from '../services/geminiContentService';
 import MarkdownRenderer from './MarkdownRenderer';
 
@@ -13,6 +13,7 @@ const CostCalculator: React.FC<CostCalculatorProps> = ({ cliente }) => {
     const [palletsUsados, setPalletsUsados] = useState<number>(0);
     const [binsUsados, setBinsUsados] = useState<number>(0);
     const [valorSeguro, setValorSeguro] = useState<number>(0);
+    const [quantidadeEntradaMaterial, setQuantidadeEntradaMaterial] = useState<number>(0);
     const [tabelaPrecos, setTabelaPrecos] = useState<TabelaPrecoItem[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [insights, setInsights] = useState<string>('');
@@ -31,6 +32,26 @@ const CostCalculator: React.FC<CostCalculatorProps> = ({ cliente }) => {
             }
         };
         loadTabelaPrecos();
+    }, [cliente?.id]);
+
+    // Load last invoice storage quantities to pre-fill calculator
+    useEffect(() => {
+        const loadLastInvoiceQuantities = async () => {
+            if (!cliente?.id) return;
+            
+            try {
+                const lastStorage = await getLastInvoiceStorageQuantities(cliente.id);
+                if (lastStorage.pallets > 0) {
+                    setPalletsUsados(lastStorage.pallets);
+                }
+                if (lastStorage.bins > 0) {
+                    setBinsUsados(lastStorage.bins);
+                }
+            } catch (error) {
+                console.error('Error loading last invoice storage quantities:', error);
+            }
+        };
+        loadLastInvoiceQuantities();
     }, [cliente?.id]);
 
     // Encontrar preços de armazenagem
@@ -53,6 +74,16 @@ const CostCalculator: React.FC<CostCalculatorProps> = ({ cliente }) => {
     const precoSeguro = useMemo(() => {
         const item = tabelaPrecos.find(p => 
             p.categoria === 'Seguro de envio' || p.descricao.toLowerCase().includes('seguro')
+        );
+        return item?.precoVenda || 0;
+    }, [tabelaPrecos]);
+
+    // Verificar se serviço "Entrada de Material" existe na tabela de preços
+    const precoEntradaMaterial = useMemo(() => {
+        const item = tabelaPrecos.find(p => 
+            p.categoria === 'Maquila/Entrada de material externo' ||
+            p.categoria.toLowerCase().includes('entrada de material') ||
+            p.descricao.toLowerCase().includes('entrada de material')
         );
         return item?.precoVenda || 0;
     }, [tabelaPrecos]);
@@ -80,9 +111,13 @@ const CostCalculator: React.FC<CostCalculatorProps> = ({ cliente }) => {
         return 0;
     }, [valorSeguro]);
 
+    const custoEntradaMaterial = useMemo(() => {
+        return quantidadeEntradaMaterial * precoEntradaMaterial;
+    }, [quantidadeEntradaMaterial, precoEntradaMaterial]);
+
     const custoTotal = useMemo(() => {
-        return custoTotalArmazenagem + custoTotalSeguro;
-    }, [custoTotalArmazenagem, custoTotalSeguro]);
+        return custoTotalArmazenagem + custoTotalSeguro + custoEntradaMaterial;
+    }, [custoTotalArmazenagem, custoTotalSeguro, custoEntradaMaterial]);
 
     const formatCurrency = (value: number) => {
         return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
@@ -96,7 +131,9 @@ const CostCalculator: React.FC<CostCalculatorProps> = ({ cliente }) => {
                 palletsUsados,
                 binsUsados,
                 custoTotalSeguro,
-                custoTotal
+                custoTotal,
+                quantidadeEntradaMaterial,
+                custoEntradaMaterial
             );
             setInsights(insightsText);
         } catch (error) {
@@ -120,6 +157,9 @@ const CostCalculator: React.FC<CostCalculatorProps> = ({ cliente }) => {
                 <h3 className="text-xl font-bold text-gray-900 mb-2">Calculadora de Custos</h3>
                 <p className="text-sm text-gray-600">
                     Calcule os custos estimados de armazenagem e seguro com base na sua tabela de preços.
+                </p>
+                <p className="text-xs text-blue-600 mt-1 font-medium">
+                    ℹ️ Os valores de pallets e bins foram preenchidos automaticamente com base na última fatura consolidada.
                 </p>
             </div>
 
@@ -183,6 +223,27 @@ const CostCalculator: React.FC<CostCalculatorProps> = ({ cliente }) => {
                         )}
                     </div>
 
+                    {precoEntradaMaterial > 0 && (
+                        <div>
+                            <label htmlFor="quantidade-entrada-material" className="block text-sm font-medium text-gray-700 mb-1">
+                                Quantidade de Entrada de Material
+                            </label>
+                            <input
+                                id="quantidade-entrada-material"
+                                type="number"
+                                min="0"
+                                step="1"
+                                value={quantidadeEntradaMaterial}
+                                onChange={(e) => setQuantidadeEntradaMaterial(parseInt(e.target.value) || 0)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                placeholder="0"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">
+                                Preço por unidade: {formatCurrency(precoEntradaMaterial)}
+                            </p>
+                        </div>
+                    )}
+
                     <div>
                         <label htmlFor="valor-seguro" className="block text-sm font-medium text-gray-700 mb-1">
                             Valor do Seguro (R$)
@@ -222,6 +283,14 @@ const CostCalculator: React.FC<CostCalculatorProps> = ({ cliente }) => {
                                     {formatCurrency(custoArmazenagemBins)}
                                 </span>
                             </div>
+                            {precoEntradaMaterial > 0 && (
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-gray-600">Entrada de Material:</span>
+                                    <span className="font-medium text-gray-800">
+                                        {formatCurrency(custoEntradaMaterial)}
+                                    </span>
+                                </div>
+                            )}
                             <div className="flex justify-between text-sm">
                                 <span className="text-gray-600">Seguro:</span>
                                 <span className="font-medium text-gray-800">

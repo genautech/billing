@@ -1,6 +1,6 @@
 import React, { useMemo, useEffect, useState } from 'react';
 import type { CobrancaMensal, Cliente, DetalheEnvio, TabelaPrecoItem } from '../types';
-import { countShipmentsInMonth, filterCSVByMonth, getDetalhesByCobrancaId, getTabelaPrecos, calculatePrecoVendaForDisplay, isTemplateItem } from '../services/firestoreService';
+import { countShipmentsInMonth, filterCSVByMonth, getDetalhesByCobrancaId, getTabelaPrecos, calculatePrecoVendaForDisplay, isTemplateItem, getLastInvoiceStorageQuantities } from '../services/firestoreService';
 
 interface ClientDashboardProps {
     clientCobrancas: CobrancaMensal[];
@@ -96,6 +96,17 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ clientCobrancas, clie
     const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
     const [allDetalhes, setAllDetalhes] = useState<DetalheEnvio[]>([]);
     const [tabelaPrecos, setTabelaPrecos] = useState<TabelaPrecoItem[]>([]);
+    const [previewData, setPreviewData] = useState<{
+        armazenagemEstimada: number;
+        palletsEstimados: number;
+        binsEstimados: number;
+        isLoading: boolean;
+    }>({
+        armazenagemEstimada: 0,
+        palletsEstimados: 0,
+        binsEstimados: 0,
+        isLoading: true
+    });
 
     // Fetch all details and price table
     useEffect(() => {
@@ -125,6 +136,72 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ clientCobrancas, clie
             fetchData();
         }
     }, [clientCobrancas, client?.id]);
+
+    // Calculate preview for November invoice
+    useEffect(() => {
+        const calculatePreview = async () => {
+            if (!client?.id || clientCobrancas.length === 0) {
+                setPreviewData({ armazenagemEstimada: 0, palletsEstimados: 0, binsEstimados: 0, isLoading: false });
+                return;
+            }
+
+            setPreviewData(prev => ({ ...prev, isLoading: true }));
+
+            try {
+                // Get storage quantities from last invoice
+                const lastStorage = await getLastInvoiceStorageQuantities(client.id);
+                
+                // Get price table to find storage prices
+                const precos = await getTabelaPrecos(client.id);
+                
+                const precoPallet = precos.find(p => 
+                    p.categoria === 'Armazenamento' && 
+                    (p.descricao.toLowerCase().includes('pallet') || p.metrica.toLowerCase().includes('pallet'))
+                )?.precoVenda || 0;
+
+                const precoBin = precos.find(p => 
+                    p.categoria === 'Armazenamento' && 
+                    (p.descricao.toLowerCase().includes('bin') || p.metrica.toLowerCase().includes('bin'))
+                )?.precoVenda || 0;
+
+                // Get last invoice to find previous stock (if available)
+                const lastInvoice = clientCobrancas.sort((a, b) => new Date(b.dataVencimento).getTime() - new Date(a.dataVencimento).getTime())[0];
+                const lastInvoiceDetalhes = await getDetalhesByCobrancaId(lastInvoice.id);
+                
+                // Try to estimate previous stock from last invoice details
+                // If we can't find it, use current stock as reference
+                const estoqueAtual = client.unidadesEmEstoque || 0;
+                
+                // Calculate proportion based on last invoice storage quantities
+                // If we have storage quantities from last invoice, use them to estimate
+                let palletsEstimados = 0;
+                let binsEstimados = 0;
+
+                if (lastStorage.pallets > 0 || lastStorage.bins > 0) {
+                    // Use the quantities from last invoice as base
+                    // For simplicity, we'll use the same quantities (assuming similar stock levels)
+                    // In a more sophisticated version, we could calculate proportion based on stock change
+                    palletsEstimados = lastStorage.pallets;
+                    binsEstimados = lastStorage.bins;
+                }
+
+                // Calculate estimated storage cost
+                const armazenagemEstimada = (palletsEstimados * precoPallet) + (binsEstimados * precoBin);
+
+                setPreviewData({
+                    armazenagemEstimada,
+                    palletsEstimados,
+                    binsEstimados,
+                    isLoading: false
+                });
+            } catch (error) {
+                console.error('Error calculating preview:', error);
+                setPreviewData({ armazenagemEstimada: 0, palletsEstimados: 0, binsEstimados: 0, isLoading: false });
+            }
+        };
+
+        calculatePreview();
+    }, [client?.id, client?.unidadesEmEstoque, clientCobrancas]);
 
     const robustCSVParser = (csvContent: string): { headers: string[]; dataLines: string[]; delimiter: string } | null => {
         if (!csvContent) return null;
@@ -395,6 +472,52 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ clientCobrancas, clie
                  <StatCard title="Valor Médio por Envio" value={averageTotalValuePerShipment} />
                  <StatCard title="Custo Operacional Médio" value={averageOperationalCost} />
                  <StatCard title="Unidades em Estoque" value={client?.unidadesEmEstoque?.toLocaleString('pt-BR') || '0'} />
+            </div>
+
+            {/* Prévia da Fatura - Novembro/2025 */}
+            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-300 rounded-lg p-6 shadow-md">
+                <h3 className="text-xl font-bold text-gray-900 mb-4">Prévia da Fatura - Novembro/2025</h3>
+                {previewData.isLoading ? (
+                    <div className="text-center text-gray-500 py-4">Calculando prévia...</div>
+                ) : (
+                    <div className="space-y-4">
+                        <div className="bg-white rounded-lg p-4 border border-blue-200">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <p className="text-sm text-gray-600 mb-1">Armazenagem Estimada</p>
+                                    <p className="text-2xl font-bold text-blue-700">
+                                        {formatCurrency(previewData.armazenagemEstimada)}
+                                    </p>
+                                    <p className="text-xs text-gray-500 mt-1">
+                                        Baseado em {client?.unidadesEmEstoque?.toLocaleString('pt-BR') || '0'} unidades em estoque
+                                    </p>
+                                    {(previewData.palletsEstimados > 0 || previewData.binsEstimados > 0) && (
+                                        <p className="text-xs text-gray-500 mt-1">
+                                            {previewData.palletsEstimados > 0 && `${previewData.palletsEstimados} pallet(s)`}
+                                            {previewData.palletsEstimados > 0 && previewData.binsEstimados > 0 && ' • '}
+                                            {previewData.binsEstimados > 0 && `${previewData.binsEstimados} bin(s)`}
+                                        </p>
+                                    )}
+                                </div>
+                                <div>
+                                    <p className="text-sm text-gray-600 mb-1">Total Parcial</p>
+                                    <p className="text-2xl font-bold text-gray-900">
+                                        {formatCurrency(previewData.armazenagemEstimada)}
+                                    </p>
+                                    <p className="text-xs text-yellow-600 mt-2 font-medium">
+                                        ⚠️ Os custos de envio serão atualizados no final do mês
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                            <p className="text-sm text-yellow-800">
+                                <strong>Nota:</strong> Esta prévia mostra apenas os custos de armazenagem baseados na quantidade atual em estoque. 
+                                Os custos de envio e outros serviços realizados durante o mês serão incluídos quando a fatura for fechada no final de novembro.
+                            </p>
+                        </div>
+                    </div>
+                )}
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
