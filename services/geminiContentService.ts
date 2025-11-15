@@ -1,0 +1,263 @@
+import { GoogleGenAI, Type } from "@google/genai";
+
+// Initialize Gemini AI
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+// Cache para conteúdo gerado
+const contentCache = new Map<string, { content: string; timestamp: number }>();
+const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 horas
+
+interface InfographicData {
+    steps: Array<{
+        title: string;
+        description: string;
+        icon: string;
+    }>;
+    difalFlow: {
+        origem: string;
+        destino: string;
+        calculo: string;
+        aplicacao: string;
+    };
+    estados: string[];
+}
+
+/**
+ * Gera conteúdo explicativo sobre cobranças mensais usando Gemini AI
+ */
+export const generateBillingExplanationContent = async (): Promise<string> => {
+    const cacheKey = 'billing-explanation';
+    const cached = contentCache.get(cacheKey);
+    
+    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+        return cached.content;
+    }
+
+    const prompt = `
+        Crie um texto explicativo claro e profissional em português do Brasil sobre como funcionam as cobranças mensais em um sistema de logística.
+        
+        O texto deve explicar:
+        1. Cobranças de envios - como são calculadas e quando são aplicadas
+        2. Cobranças de armazenagem - como o espaço ocupado é medido e cobrado
+        3. Cobranças de adicionais - quando e por que custos adicionais são aplicados
+        
+        O texto deve ser direto, fácil de entender para departamentos de compras, e destacar a transparência do processo.
+        Use no máximo 500 palavras.
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+
+        const content = response.text;
+        contentCache.set(cacheKey, { content, timestamp: Date.now() });
+        return content;
+    } catch (error) {
+        console.error('Error generating billing explanation:', error);
+        // Fallback para conteúdo estático
+        return `As cobranças mensais são divididas em três categorias principais:
+
+**Cobranças de Envios**: Refere-se aos custos de frete para transportar pedidos do nosso armazém até o destino final. O valor é calculado com base no peso, dimensões (peso cúbico) e na localidade de entrega (capital, interior, etc.). Cada etiqueta de envio gerada representa uma cobrança.
+
+**Cobranças de Armazenagem**: Custo para manter seus produtos em nosso estoque de forma segura. É calculado com base no espaço ocupado (por posição de pallet, prateleira, bin, etc.) ou por unidade de produto, medido durante um período específico.
+
+**Cobranças de Adicionais**: Agrupa custos adicionais como impostos (ex: DIFAL), seguro de envio, taxas de manuseio para itens frágeis ou custos de devolução (logística reversa). Cada um é detalhado na fatura quando aplicável.
+
+Todas as cobranças são transparentes e detalhadas em suas faturas mensais, permitindo total visibilidade dos custos operacionais.`;
+    }
+};
+
+/**
+ * Gera explicação detalhada sobre DIFAL usando Gemini AI
+ */
+export const generateDIFALExplanation = async (): Promise<string> => {
+    const cacheKey = 'difal-explanation';
+    const cached = contentCache.get(cacheKey);
+    
+    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+        return cached.content;
+    }
+
+    const prompt = `
+        Crie uma explicação detalhada e clara em português do Brasil sobre o DIFAL (Diferencial de Alíquota do ICMS) no contexto de logística e e-commerce.
+        
+        A explicação deve cobrir:
+        1. O que é o DIFAL e por que existe
+        2. Como é calculado no processo de envio
+        3. Quando é aplicado (origem e destino)
+        4. Como a Cubbo processa e cobra o DIFAL de forma transparente
+        5. Como aparece nas notas fiscais de envio
+        
+        O texto deve ser técnico mas acessível, adequado para departamentos de compras e contabilidade.
+        Use no máximo 600 palavras.
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+
+        const content = response.text;
+        contentCache.set(cacheKey, { content, timestamp: Date.now() });
+        return content;
+    } catch (error) {
+        console.error('Error generating DIFAL explanation:', error);
+        // Fallback para conteúdo estático
+        return `O DIFAL (Diferencial de Alíquota do ICMS) é um mecanismo tributário que garante que o estado de destino receba a diferença entre as alíquotas de ICMS quando há variação entre estados.
+
+**Como funciona**: Quando um produto é enviado de um estado para outro, e as alíquotas de ICMS são diferentes, o DIFAL é calculado para compensar essa diferença. O estado de destino recebe a parte que lhe cabe do imposto.
+
+**No processo da Cubbo**: 
+- Calculamos o DIFAL automaticamente para cada envio baseado na origem (nossa localização) e destino (CEP do cliente final)
+- O valor é incluído na nota fiscal de envio de forma transparente
+- A cobrança aparece separadamente na fatura mensal, permitindo rastreabilidade completa
+
+**Transparência**: Todos os envios incluem a nota fiscal com o DIFAL calculado, e na sua fatura mensal você pode ver exatamente quanto foi cobrado de DIFAL em cada pedido, facilitando a conciliação contábil.`;
+    }
+};
+
+/**
+ * Gera insights e sugestões para a calculadora de custos usando Gemini AI
+ */
+export const generateCalculatorInsights = async (
+    quantidadeEstoque: number,
+    palletsUsados: number,
+    binsUsados: number,
+    valorSeguro: number,
+    custoTotal: number
+): Promise<string> => {
+    const prompt = `
+        Com base nos seguintes dados de cálculo de custos de logística:
+        - Quantidade em estoque: ${quantidadeEstoque}
+        - Pallets usados: ${palletsUsados}
+        - Bins usados: ${binsUsados}
+        - Valor do seguro: R$ ${valorSeguro.toFixed(2)}
+        - Custo total estimado: R$ ${custoTotal.toFixed(2)}
+        
+        Gere insights úteis e sugestões em português do Brasil (máximo 200 palavras) sobre:
+        1. Otimizações possíveis no uso de espaço
+        2. Comparação com médias do setor (se aplicável)
+        3. Dicas para reduzir custos de armazenagem
+        4. Observações sobre o seguro
+        
+        Seja objetivo e prático.
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+
+        return response.text;
+    } catch (error) {
+        console.error('Error generating calculator insights:', error);
+        return `Com base nos valores informados, o custo total estimado é de R$ ${custoTotal.toFixed(2)}. 
+        
+Para otimizar custos, considere revisar a organização do estoque para maximizar o uso de pallets e reduzir bins quando possível. O seguro representa uma proteção importante para seus produtos durante o armazenamento.`;
+    }
+};
+
+/**
+ * Gera estrutura de dados para o infográfico de tributação usando Gemini AI
+ */
+export const generateInfographicData = async (): Promise<InfographicData> => {
+    const cacheKey = 'infographic-data';
+    const cached = contentCache.get(cacheKey);
+    
+    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+        return JSON.parse(cached.content);
+    }
+
+    const prompt = `
+        Crie uma estrutura JSON para um infográfico sobre o processo de tributação DIFAL no envio de produtos.
+        
+        A estrutura deve ter:
+        1. "steps": array de objetos com {title, description, icon} representando as etapas do processo de envio até a geração do DIFAL
+        2. "difalFlow": objeto com {origem, destino, calculo, aplicacao} explicando o fluxo do DIFAL
+        3. "estados": array de strings com os principais estados envolvidos na tributação
+        
+        Responda ESTRITAMENTE em JSON válido, sem texto adicional.
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+            config: {
+                responseMimeType: 'application/json',
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        steps: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    title: { type: Type.STRING },
+                                    description: { type: Type.STRING },
+                                    icon: { type: Type.STRING }
+                                }
+                            }
+                        },
+                        difalFlow: {
+                            type: Type.OBJECT,
+                            properties: {
+                                origem: { type: Type.STRING },
+                                destino: { type: Type.STRING },
+                                calculo: { type: Type.STRING },
+                                aplicacao: { type: Type.STRING }
+                            }
+                        },
+                        estados: {
+                            type: Type.ARRAY,
+                            items: { type: Type.STRING }
+                        }
+                    }
+                }
+            }
+        });
+
+        const data = JSON.parse(response.text);
+        contentCache.set(cacheKey, { content: JSON.stringify(data), timestamp: Date.now() });
+        return data;
+    } catch (error) {
+        console.error('Error generating infographic data:', error);
+        // Fallback para dados estáticos
+        return {
+            steps: [
+                {
+                    title: 'Pedido Recebido',
+                    description: 'Cliente final faz pedido e o sistema identifica origem e destino',
+                    icon: '📦'
+                },
+                {
+                    title: 'Cálculo de Tributação',
+                    description: 'Sistema calcula DIFAL baseado nas alíquotas de ICMS dos estados',
+                    icon: '🧮'
+                },
+                {
+                    title: 'Geração da Nota Fiscal',
+                    description: 'Nota fiscal de envio é gerada incluindo o DIFAL calculado',
+                    icon: '📄'
+                },
+                {
+                    title: 'Envio e Cobrança',
+                    description: 'Produto é enviado e o DIFAL aparece na fatura mensal do cliente',
+                    icon: '🚚'
+                }
+            ],
+            difalFlow: {
+                origem: 'Estado de origem (onde está o armazém)',
+                destino: 'Estado de destino (onde está o cliente final)',
+                calculo: 'Diferença entre alíquotas de ICMS dos dois estados',
+                aplicacao: 'Aplicado automaticamente em cada envio interestadual'
+            },
+            estados: ['SP', 'RJ', 'MG', 'RS', 'PR', 'SC', 'BA', 'GO']
+        };
+    }
+};
+

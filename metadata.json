@@ -1,0 +1,5 @@
+{
+  "name": "Yoobe Logistics Billing System",
+  "description": "A robust Cost Management and Billing system for logistics. It manages cost concepts with profit margins, processes shipping reports, consolidates client billing, and offers a transparent, login-free Client Area.",
+  "requestFramePermissions": []
+}
