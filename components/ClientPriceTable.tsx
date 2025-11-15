@@ -10,9 +10,12 @@ const ClientPriceTable: React.FC<ClientPriceTableProps> = ({ tabelaPrecos }) => 
         return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
     };
 
-    // Filter out internal template items (priced at 1.00) before display
+    // Filter out internal template items (priced at 1.00) and internal costs before display
     const filteredPrecos = useMemo(() => 
-        tabelaPrecos.filter(item => item.precoVenda !== 1),
+        tabelaPrecos.filter(item => 
+            item.precoVenda !== 1 && 
+            item.categoria !== 'Custos Internos'
+        ),
     [tabelaPrecos]);
 
     const groupedPrecos = filteredPrecos.reduce((acc, item) => {
