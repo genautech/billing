@@ -247,3 +247,4 @@ Para dúvidas ou problemas, abra uma issue no repositório GitHub.
 ## Licença
 
 Este projeto é privado e proprietário da Yoobe Logistics.
+
