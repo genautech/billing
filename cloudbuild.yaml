@@ -40,6 +40,19 @@ steps:
       - '--set-secrets'
       - 'GEMINI_API_KEY=gemini-api-key:latest'
     id: 'deploy-cloud-run'
+  
+  # Configure public access (if not already set)
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'services'
+      - 'add-iam-policy-binding'
+      - 'billing-app'
+      - '--region=us-central1'
+      - '--member=allUsers'
+      - '--role=roles/run.invoker'
+    id: 'set-public-access'
 
 images:
   - 'gcr.io/$PROJECT_ID/billing-app:$SHORT_SHA'
