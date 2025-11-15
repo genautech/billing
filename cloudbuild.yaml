@@ -37,8 +37,8 @@ steps:
       - '80'
       - '--max-instances'
       - '10'
-      - '--set-env-vars'
-      - 'GEMINI_API_KEY=${_GEMINI_API_KEY}'
+      - '--set-secrets'
+      - 'GEMINI_API_KEY=gemini-api-key:latest'
     id: 'deploy-cloud-run'
 
 images:
@@ -49,8 +49,7 @@ options:
   machineType: 'E2_HIGHCPU_8'
   logging: CLOUD_LOGGING_ONLY
 
-substitutions:
-  _GEMINI_API_KEY: '' # Set this in Cloud Build trigger or use Secret Manager
+
 
 timeout: '1200s'
 
