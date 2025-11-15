@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { updateGeneralSettings, updateCliente } from '../../../services/firestoreService';
 import type { GeneralSettings, Cliente } from '../../../types';
 import { useToast } from '../../../contexts/ToastContext';
-import { FormInput } from '../../ui/FormControls';
+import { FormInput, FormSelect } from '../../ui/FormControls';
 
 interface GeneralSettingsViewProps {
     onUpdate: () => void;
@@ -106,6 +106,98 @@ const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({ onUpdate, set
                     <div className="flex justify-end">
                         <button type="submit" disabled={isSubmitting} className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:bg-blue-300">
                             {isSubmitting ? 'Salvando...' : 'Salvar Configurações'}
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <div className="bg-white p-6 rounded-lg shadow-md">
+                <h3 className="text-2xl font-bold text-gray-900 mb-4">Dados de Pagamento da Yoobe</h3>
+                <form onSubmit={handleSettingsSubmit} className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700">Nome do Banco</label>
+                            <FormInput 
+                                type="text" 
+                                value={currentSettings.paymentBankName || ''} 
+                                onChange={(e) => setCurrentSettings(p => ({...p, paymentBankName: e.target.value}))}
+                                placeholder="Banco do Brasil"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700">Agência</label>
+                            <FormInput 
+                                type="text" 
+                                value={currentSettings.paymentBankAgency || ''} 
+                                onChange={(e) => setCurrentSettings(p => ({...p, paymentBankAgency: e.target.value}))}
+                                placeholder="1234-5"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700">Conta</label>
+                            <FormInput 
+                                type="text" 
+                                value={currentSettings.paymentBankAccount || ''} 
+                                onChange={(e) => setCurrentSettings(p => ({...p, paymentBankAccount: e.target.value}))}
+                                placeholder="12345-6"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700">Tipo de Conta</label>
+                            <FormSelect 
+                                value={currentSettings.paymentBankAccountType || ''} 
+                                onChange={(e) => setCurrentSettings(p => ({...p, paymentBankAccountType: e.target.value}))}
+                            >
+                                <option value="">Selecione...</option>
+                                <option value="corrente">Conta Corrente</option>
+                                <option value="poupanca">Conta Poupança</option>
+                            </FormSelect>
+                        </div>
+                        <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-gray-700">Chave PIX</label>
+                            <FormInput 
+                                type="text" 
+                                value={currentSettings.paymentPixKey || ''} 
+                                onChange={(e) => setCurrentSettings(p => ({...p, paymentPixKey: e.target.value}))}
+                                placeholder="CPF, CNPJ, Email ou Chave Aleatória"
+                            />
+                        </div>
+                    </div>
+                    <div className="border-t pt-4 mt-4">
+                        <h4 className="text-lg font-semibold text-gray-800 mb-4">Contato para Pagamento</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Nome do Contato</label>
+                                <FormInput 
+                                    type="text" 
+                                    value={currentSettings.paymentContactName || ''} 
+                                    onChange={(e) => setCurrentSettings(p => ({...p, paymentContactName: e.target.value}))}
+                                    placeholder="Nome do responsável"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Email</label>
+                                <FormInput 
+                                    type="email" 
+                                    value={currentSettings.paymentContactEmail || ''} 
+                                    onChange={(e) => setCurrentSettings(p => ({...p, paymentContactEmail: e.target.value}))}
+                                    placeholder="contato@yoobe.co"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Telefone</label>
+                                <FormInput 
+                                    type="tel" 
+                                    value={currentSettings.paymentContactPhone || ''} 
+                                    onChange={(e) => setCurrentSettings(p => ({...p, paymentContactPhone: e.target.value}))}
+                                    placeholder="(11) 99999-9999"
+                                />
+                            </div>
+                        </div>
+                    </div>
+                    <div className="flex justify-end">
+                        <button type="submit" disabled={isSubmitting} className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:bg-blue-300">
+                            {isSubmitting ? 'Salvando...' : 'Salvar Dados de Pagamento'}
                         </button>
                     </div>
                 </form>

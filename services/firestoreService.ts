@@ -1,6 +1,6 @@
 // FIX: Rewrote Firestore calls to use the v8 compatibility API to resolve import errors.
-import { db, firebaseConfig } from './firebase';
-import type { Cliente, TabelaPrecoItem, CobrancaMensal, DetalheEnvio, AIAnalysis, CustoAdicional, GeneralSettings, FaqItem, TabelaPrecoCliente } from '../types';
+import { db, storage, firebaseConfig } from './firebase';
+import type { Cliente, TabelaPrecoItem, CobrancaMensal, DetalheEnvio, AIAnalysis, CustoAdicional, GeneralSettings, FaqItem, TabelaPrecoCliente, DocumentoPedido } from '../types';
 import { GoogleGenAI, Type } from "@google/genai";
 
 // Initialize Gemini AI
@@ -13,6 +13,7 @@ const tabelaPrecosClientesCol = db.collection('tabelaPrecosClientes');
 const cobrancasCol = db.collection('cobrancasMensais');
 const configuracoesCol = db.collection('configuracoes');
 const faqCol = db.collection('faq');
+const documentosCol = db.collection('documentosPedidos');
 
 
 // --- Admin User Seeding ---
@@ -2320,4 +2321,73 @@ export const seedInitialFaqs = async () => {
     } catch (error) {
         console.error("Error seeding FAQ data with Gemini:", error);
     }
+};
+
+// --- Firebase Storage Functions ---
+
+export const uploadFileToStorage = async (file: File, path: string): Promise<string> => {
+    const storageRef = storage.ref();
+    const fileRef = storageRef.child(path);
+    const snapshot = await fileRef.put(file);
+    return await snapshot.ref.getDownloadURL();
+};
+
+export const deleteFileFromStorage = async (url: string): Promise<void> => {
+    try {
+        const fileRef = storage.refFromURL(url);
+        await fileRef.delete();
+    } catch (error) {
+        console.error("Error deleting file from storage:", error);
+        throw error;
+    }
+};
+
+// --- Documentos Pedidos Functions ---
+
+export const getDocumentosByCobrancaId = async (cobrancaId: string): Promise<DocumentoPedido[]> => {
+    const q = documentosCol.where('cobrancaId', '==', cobrancaId);
+    const snapshot = await q.get();
+    const docs = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as DocumentoPedido));
+    // Sort by uploadDate descending manually
+    return docs.sort((a, b) => new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime());
+};
+
+export const getDocumentosByClienteAndMonth = async (clienteId: string, mesReferencia: string): Promise<DocumentoPedido[]> => {
+    const q = documentosCol.where('clienteId', '==', clienteId)
+        .where('mesReferencia', '==', mesReferencia);
+    const snapshot = await q.get();
+    const docs = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as DocumentoPedido));
+    // Sort by uploadDate descending manually since we can't use orderBy with multiple where clauses without index
+    return docs.sort((a, b) => new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime());
+};
+
+export const saveDocumentoPedido = async (documento: Omit<DocumentoPedido, 'id'>): Promise<string> => {
+    const docRef = documentosCol.doc();
+    await docRef.set(documento);
+    return docRef.id;
+};
+
+export const deleteDocumentoPedido = async (documentoId: string): Promise<void> => {
+    const docRef = documentosCol.doc(documentoId);
+    const doc = await docRef.get();
+    if (doc.exists) {
+        const data = doc.data() as DocumentoPedido;
+        // Delete file from storage if exists
+        if (data.fileUrl) {
+            try {
+                await deleteFileFromStorage(data.fileUrl);
+            } catch (error) {
+                console.error("Error deleting file from storage:", error);
+            }
+        }
+        await docRef.delete();
+    }
+};
+
+export const updateCobrancaWithNotaFiscal = async (cobrancaId: string, notaFiscalUrl: string, fileName: string): Promise<void> => {
+    const cobrancaRef = cobrancasCol.doc(cobrancaId);
+    await cobrancaRef.update({
+        notaFiscalUrl,
+        notaFiscalFileName: fileName
+    });
 };

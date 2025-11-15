@@ -255,7 +255,8 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ isAdminViewing, authenticat
                             {isDetalhesLoading ? (
                                 <div className="bg-white h-full flex items-center justify-center p-6 rounded-lg shadow-md"><p>Carregando detalhes...</p></div>
                             ) : selectedCobranca ? (
-                                <ClientBillDetail 
+                                <ClientBillDetail
+                                    settings={settings} 
                                     cobranca={selectedCobranca} 
                                     detalhes={selectedDetalhes} 
                                     custosAdicionais={selectedCustosAdicionais}

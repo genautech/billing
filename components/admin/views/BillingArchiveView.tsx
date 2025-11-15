@@ -1,8 +1,9 @@
 import React, { useState, useMemo } from 'react';
-import { getDetalhesByCobrancaId, getCustosAdicionaisByCobrancaId, generateInvoiceAnalysis, deleteCobranca, salvarCobrancaEditada, updateCobrancaStatus, calculatePrecoVenda, calculatePrecoVendaForDisplay, isTemplateItem, getShareableUrl } from '../../../services/firestoreService';
+import { getDetalhesByCobrancaId, getCustosAdicionaisByCobrancaId, generateInvoiceAnalysis, deleteCobranca, salvarCobrancaEditada, updateCobrancaStatus, calculatePrecoVenda, calculatePrecoVendaForDisplay, isTemplateItem, getShareableUrl, uploadFileToStorage, updateCobrancaWithNotaFiscal, deleteFileFromStorage } from '../../../services/firestoreService';
 import type { CobrancaMensal, Cliente, TabelaPrecoItem, DetalheEnvio, CustoAdicional } from '../../../types';
 import { useToast } from '../../../contexts/ToastContext';
 import { FormInput, FormSelect } from '../../ui/FormControls';
+import { FileUpload } from '../../ui/FileUpload';
 
 
 // --- Invoice Editing Modal Component ---
@@ -21,6 +22,9 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
     const [custosAdicionais, setCustosAdicionais] = useState<CustoAdicional[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
+    const [notaFiscalFile, setNotaFiscalFile] = useState<File | null>(null);
+    const [isUploadingNotaFiscal, setIsUploadingNotaFiscal] = useState(false);
+    const { addToast } = useToast();
 
     const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 
@@ -156,6 +160,43 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
         recalculateTotals(detalhes, newCustos);
     };
 
+    const handleUploadNotaFiscal = async () => {
+        if (!notaFiscalFile) {
+            addToast('Selecione um arquivo de nota fiscal.', 'error');
+            return;
+        }
+
+        setIsUploadingNotaFiscal(true);
+        try {
+            const path = `notas-fiscais/${cobranca.clienteId}/${cobranca.id}/${Date.now()}_${notaFiscalFile.name}`;
+            const url = await uploadFileToStorage(notaFiscalFile, path);
+            await updateCobrancaWithNotaFiscal(cobranca.id, url, notaFiscalFile.name);
+            setCobranca(prev => ({ ...prev, notaFiscalUrl: url, notaFiscalFileName: notaFiscalFile.name }));
+            setNotaFiscalFile(null);
+            addToast('Nota fiscal anexada com sucesso!', 'success');
+        } catch (error) {
+            console.error("Failed to upload nota fiscal:", error);
+            addToast('Erro ao anexar nota fiscal.', 'error');
+        } finally {
+            setIsUploadingNotaFiscal(false);
+        }
+    };
+
+    const handleRemoveNotaFiscal = async () => {
+        if (!cobranca.notaFiscalUrl) return;
+
+        if (!confirm('Tem certeza que deseja remover a nota fiscal?')) return;
+
+        try {
+            await deleteFileFromStorage(cobranca.notaFiscalUrl);
+            setCobranca(prev => ({ ...prev, notaFiscalUrl: undefined, notaFiscalFileName: undefined }));
+            addToast('Nota fiscal removida com sucesso!', 'success');
+        } catch (error) {
+            console.error("Failed to remove nota fiscal:", error);
+            addToast('Erro ao remover nota fiscal.', 'error');
+        }
+    };
+
     const handleSave = async () => {
         setIsSaving(true);
         await onSave(cobranca, detalhes, custosAdicionais);
@@ -266,6 +307,62 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" /></svg>
                                     <span>Adicionar Custo Adicional</span>
                                 </button>
+                            </div>
+                            <div className="mt-6 pt-6 border-t">
+                                <h4 className="font-semibold text-gray-700 mb-4">Documentos e Pagamento</h4>
+                                <div className="space-y-4">
+                                    <div>
+                                        <FileUpload
+                                            id="nota-fiscal-edit"
+                                            label="Nota Fiscal"
+                                            accept="application/pdf,image/*"
+                                            maxSizeMB={10}
+                                            onFileSelect={setNotaFiscalFile}
+                                            file={notaFiscalFile}
+                                            isUploading={isUploadingNotaFiscal}
+                                        />
+                                        {cobranca.notaFiscalUrl && (
+                                            <div className="mt-2 p-3 bg-green-50 rounded-md flex items-center justify-between">
+                                                <div className="flex items-center space-x-2">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                    </svg>
+                                                    <div>
+                                                        <p className="text-sm font-medium text-gray-900">{cobranca.notaFiscalFileName || 'Nota fiscal anexada'}</p>
+                                                        <a href={cobranca.notaFiscalUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:text-blue-800">Ver arquivo</a>
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleRemoveNotaFiscal}
+                                                    className="text-red-600 hover:text-red-800 text-sm"
+                                                >
+                                                    Remover
+                                                </button>
+                                            </div>
+                                        )}
+                                        {notaFiscalFile && (
+                                            <button
+                                                type="button"
+                                                onClick={handleUploadNotaFiscal}
+                                                disabled={isUploadingNotaFiscal}
+                                                className="mt-2 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:bg-gray-400 text-sm"
+                                            >
+                                                {isUploadingNotaFiscal ? 'Enviando...' : 'Anexar Nota Fiscal'}
+                                            </button>
+                                        )}
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">Link de Pagamento (Opcional)</label>
+                                        <FormInput
+                                            type="url"
+                                            value={cobranca.urlLinkPagamento || ''}
+                                            onChange={e => setCobranca(p => ({...p, urlLinkPagamento: e.target.value}))}
+                                            placeholder="https://..."
+                                        />
+                                        <p className="mt-1 text-xs text-gray-500">URL para página de pagamento ou boleto</p>
+                                    </div>
+                                </div>
                             </div>
                         </>
                     )}

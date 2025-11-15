@@ -1,9 +1,11 @@
-import React, { useState, useRef, useMemo } from 'react';
-import type { CobrancaMensal, DetalheEnvio, TabelaPrecoItem, Cliente, CustoAdicional } from '../types';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
+import type { CobrancaMensal, DetalheEnvio, TabelaPrecoItem, Cliente, CustoAdicional, DocumentoPedido, GeneralSettings } from '../types';
 // FIX: Corrected import path
-import { generateClientInvoiceAnalysis, confirmarRecebimentoFatura, calculatePrecoVenda, calculatePrecoVendaForDisplay, isTemplateItem } from '../services/firestoreService';
+import { generateClientInvoiceAnalysis, confirmarRecebimentoFatura, calculatePrecoVenda, calculatePrecoVendaForDisplay, isTemplateItem, getDocumentosByCobrancaId, getGeneralSettings } from '../services/firestoreService';
+import { generateCicloNotaFiscalExplanation } from '../services/geminiContentService';
 import { useToast } from '../contexts/ToastContext';
 import MarkdownRenderer from './MarkdownRenderer';
+import CicloNotaFiscalInfographic from './CicloNotaFiscalInfographic';
 
 // These will be available on the window object from the CDN scripts
 declare const jspdf: any;
@@ -16,11 +18,12 @@ interface ClientBillDetailProps {
     tabelaPrecos: TabelaPrecoItem[];
     client: Cliente | undefined;
     onUpdate: () => void;
+    settings?: GeneralSettings | null;
 }
 
 
 
-const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes, custosAdicionais, tabelaPrecos, client, onUpdate }) => {
+const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes, custosAdicionais, tabelaPrecos, client, onUpdate, settings: initialSettings }) => {
     const [isPdfLoading, setIsPdfLoading] = useState(false);
     const [isConfirming, setIsConfirming] = useState(false);
     const pdfContentRef = useRef<HTMLDivElement>(null);
@@ -35,6 +38,19 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
     // State for view toggle
     const [viewMode, setViewMode] = useState<'categorized' | 'table'>('categorized');
     const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
+    
+    // State for Documents and Payment
+    const [documentos, setDocumentos] = useState<DocumentoPedido[]>([]);
+    const [settings, setSettings] = useState<GeneralSettings | null>(initialSettings || null);
+    const [cicloExplanation, setCicloExplanation] = useState<string>('');
+    const [isLoadingCicloExplanation, setIsLoadingCicloExplanation] = useState(false);
+    
+    useEffect(() => {
+        loadDocumentos();
+        if (!initialSettings) {
+            loadSettings();
+        }
+    }, [cobranca.id]);
 
     const handleGeneratePDF = async () => {
         if (!pdfContentRef.current) return;
@@ -303,6 +319,37 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
         }
     };
     
+    const loadDocumentos = async () => {
+        try {
+            const docs = await getDocumentosByCobrancaId(cobranca.id);
+            setDocumentos(docs);
+        } catch (error) {
+            console.error("Failed to load documentos:", error);
+        }
+    };
+
+    const loadSettings = async () => {
+        try {
+            const settingsData = await getGeneralSettings();
+            setSettings(settingsData);
+        } catch (error) {
+            console.error("Failed to load settings:", error);
+        }
+    };
+
+    const handleLoadCicloExplanation = async () => {
+        setIsLoadingCicloExplanation(true);
+        try {
+            const explanation = await generateCicloNotaFiscalExplanation();
+            setCicloExplanation(explanation);
+        } catch (error) {
+            console.error("Failed to load ciclo explanation:", error);
+            addToast('Erro ao carregar explicação do ciclo.', 'error');
+        } finally {
+            setIsLoadingCicloExplanation(false);
+        }
+    };
+
     const handleConfirmReceipt = async () => {
         setIsConfirming(true);
         try {
@@ -656,6 +703,152 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                             </button>
                         </div>
                     )}
+                </div>
+
+                {/* Documentos e Pagamento Section */}
+                <div className="mt-6 pt-6 border-t">
+                    <h4 className="text-xl font-bold text-gray-900 mb-6">Documentos e Pagamento</h4>
+                    
+                    {/* Ciclo de Notas Fiscais */}
+                    <div className="mb-8">
+                        <div className="flex justify-between items-center mb-4">
+                            <h5 className="text-lg font-semibold text-gray-800">Ciclo de Notas Fiscais</h5>
+                            <button
+                                onClick={handleLoadCicloExplanation}
+                                disabled={isLoadingCicloExplanation}
+                                className="text-sm bg-purple-600 text-white px-3 py-1.5 rounded-md hover:bg-purple-700 disabled:bg-gray-400"
+                            >
+                                {isLoadingCicloExplanation ? 'Carregando...' : 'Atualizar Explicação'}
+                            </button>
+                        </div>
+                        <CicloNotaFiscalInfographic />
+                        {cicloExplanation && (
+                            <div className="mt-4 p-4 bg-gray-50 rounded-md border">
+                                <div className="prose prose-sm max-w-none">
+                                    <MarkdownRenderer content={cicloExplanation} />
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                    
+                    {/* Documentos da Fatura */}
+                    <div className="mb-8">
+                        <h5 className="text-lg font-semibold text-gray-800 mb-4">Documentos da Fatura</h5>
+                        <div className="space-y-3">
+                            {cobranca.notaFiscalUrl && (
+                                <div className="flex items-center justify-between p-4 bg-blue-50 rounded-md border border-blue-200">
+                                    <div className="flex items-center space-x-3">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                        </svg>
+                                        <div>
+                                            <p className="font-medium text-gray-900">Nota Fiscal</p>
+                                            <p className="text-sm text-gray-500">{cobranca.notaFiscalFileName || 'Arquivo anexado'}</p>
+                                        </div>
+                                    </div>
+                                    <a
+                                        href={cobranca.notaFiscalUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-blue-600 hover:text-blue-800 font-medium"
+                                    >
+                                        Ver/Download
+                                    </a>
+                                </div>
+                            )}
+                            {documentos.filter(d => d.tipo === 'pedido').map(doc => (
+                                <div key={doc.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-md border">
+                                    <div className="flex items-center space-x-3">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                        </svg>
+                                        <div>
+                                            <p className="font-medium text-gray-900">Pedido</p>
+                                            <p className="text-sm text-gray-500">{doc.fileName}</p>
+                                        </div>
+                                    </div>
+                                    <a
+                                        href={doc.fileUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-blue-600 hover:text-blue-800 font-medium"
+                                    >
+                                        Ver/Download
+                                    </a>
+                                </div>
+                            ))}
+                            {!cobranca.notaFiscalUrl && documentos.filter(d => d.tipo === 'pedido').length === 0 && (
+                                <p className="text-sm text-gray-500">Nenhum documento anexado ainda.</p>
+                            )}
+                        </div>
+                        {cobranca.explicacaoNotaFiscal && (
+                            <div className="mt-4 p-4 bg-gray-50 rounded-md border">
+                                <h6 className="font-semibold text-gray-700 mb-2">Explicação da Nota Fiscal</h6>
+                                <p className="text-sm text-gray-700 whitespace-pre-wrap">{cobranca.explicacaoNotaFiscal}</p>
+                            </div>
+                        )}
+                    </div>
+                    
+                    {/* Dados para Pagamento */}
+                    <div>
+                        <h5 className="text-lg font-semibold text-gray-800 mb-4">Dados para Pagamento</h5>
+                        {settings && (
+                            <div className="bg-white p-6 rounded-lg border space-y-4">
+                                {settings.paymentBankName && (
+                                    <div>
+                                        <p className="text-sm font-medium text-gray-700">Banco</p>
+                                        <p className="text-gray-900">{settings.paymentBankName}</p>
+                                    </div>
+                                )}
+                                {(settings.paymentBankAgency || settings.paymentBankAccount) && (
+                                    <div className="grid grid-cols-2 gap-4">
+                                        {settings.paymentBankAgency && (
+                                            <div>
+                                                <p className="text-sm font-medium text-gray-700">Agência</p>
+                                                <p className="text-gray-900">{settings.paymentBankAgency}</p>
+                                            </div>
+                                        )}
+                                        {settings.paymentBankAccount && (
+                                            <div>
+                                                <p className="text-sm font-medium text-gray-700">Conta</p>
+                                                <p className="text-gray-900">{settings.paymentBankAccount} {settings.paymentBankAccountType && `(${settings.paymentBankAccountType === 'corrente' ? 'Corrente' : 'Poupança'})`}</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                                {settings.paymentPixKey && (
+                                    <div>
+                                        <p className="text-sm font-medium text-gray-700">Chave PIX</p>
+                                        <p className="text-gray-900 font-mono">{settings.paymentPixKey}</p>
+                                    </div>
+                                )}
+                                {(settings.paymentContactName || settings.paymentContactEmail || settings.paymentContactPhone) && (
+                                    <div className="border-t pt-4">
+                                        <p className="text-sm font-medium text-gray-700 mb-2">Contato para Pagamento</p>
+                                        {settings.paymentContactName && <p className="text-gray-900">{settings.paymentContactName}</p>}
+                                        {settings.paymentContactEmail && <p className="text-gray-900">{settings.paymentContactEmail}</p>}
+                                        {settings.paymentContactPhone && <p className="text-gray-900">{settings.paymentContactPhone}</p>}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                        {cobranca.urlLinkPagamento && (
+                            <div className="mt-4">
+                                <a
+                                    href={cobranca.urlLinkPagamento}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center space-x-2 text-white bg-green-600 hover:bg-green-700 px-6 py-3 rounded-md font-medium transition-colors"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                        <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" />
+                                        <path fillRule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z" clipRule="evenodd" />
+                                    </svg>
+                                    <span>Acessar Link de Pagamento</span>
+                                </a>
+                            </div>
+                        )}
+                    </div>
                 </div>
 
             </div>

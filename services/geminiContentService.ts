@@ -1,4 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
+import type { CobrancaMensal } from '../types';
 
 // Initialize Gemini AI
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -308,6 +309,163 @@ export const generateInfographicData = async (): Promise<InfographicData> => {
             },
             estados: ['SP', 'RJ', 'MG', 'RS', 'PR', 'SC', 'BA', 'GO']
         };
+    }
+};
+
+/**
+ * Gera explicação de uma nota fiscal específica usando Gemini AI
+ */
+export const generateNotaFiscalExplanation = async (notaFiscalText: string, cobranca: CobrancaMensal): Promise<string> => {
+    const cacheKey = `nota-fiscal-${cobranca.id}`;
+    const cached = contentCache.get(cacheKey);
+    
+    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+        return cached.content;
+    }
+
+    const prompt = `
+        Analise a seguinte nota fiscal e gere uma explicação clara e profissional em português do Brasil.
+        
+        Informações da cobrança:
+        - Mês de referência: ${cobranca.mesReferencia}
+        - Valor total: R$ ${cobranca.valorTotal.toFixed(2)}
+        - Total de envios: R$ ${cobranca.totalEnvio.toFixed(2)}
+        - Total de armazenagem: R$ ${cobranca.totalArmazenagem.toFixed(2)}
+        - Total de custos logísticos: R$ ${cobranca.totalCustosLogisticos.toFixed(2)}
+        
+        Texto da nota fiscal:
+        ${notaFiscalText.substring(0, 5000)} ${notaFiscalText.length > 5000 ? '...' : ''}
+        
+        Gere uma explicação que:
+        1. Identifique os principais itens cobrados
+        2. Explique os valores de forma clara
+        3. Destaque informações importantes para o departamento financeiro
+        4. Seja direto e objetivo (máximo 400 palavras)
+        
+        **IMPORTANTE - Formato do Conteúdo:**
+        - NÃO inclua assinaturas, saudações finais
+        - NÃO use placeholders
+        - O conteúdo deve ser puramente informativo
+        - Use apenas informações reais da nota fiscal
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+
+        const content = response.text;
+        contentCache.set(cacheKey, { content, timestamp: Date.now() });
+        return content;
+    } catch (error) {
+        console.error('Error generating nota fiscal explanation:', error);
+        return `Explicação da nota fiscal para ${cobranca.mesReferencia}:
+        
+Valor total: R$ ${cobranca.valorTotal.toFixed(2)}
+Total de envios: R$ ${cobranca.totalEnvio.toFixed(2)}
+Total de armazenagem: R$ ${cobranca.totalArmazenagem.toFixed(2)}
+Total de custos logísticos: R$ ${cobranca.totalCustosLogisticos.toFixed(2)}
+
+Esta nota fiscal contém os serviços de logística prestados pela Yoobe no período de referência indicado.`;
+    }
+};
+
+/**
+ * Gera explicação completa do ciclo de notas fiscais usando Gemini AI
+ */
+export const generateCicloNotaFiscalExplanation = async (): Promise<string> => {
+    const cacheKey = 'ciclo-nota-fiscal';
+    const cached = contentCache.get(cacheKey);
+    
+    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+        return cached.content;
+    }
+
+    const prompt = `
+        Crie uma explicação completa e clara em português do Brasil sobre o ciclo de notas fiscais da Yoobe para o departamento financeiro.
+        
+        A explicação deve cobrir:
+        
+        1. **Serviços Mensais vs Produtos**:
+           - Serviços de logística são cobrados mensalmente
+           - Produtos são armazenados e depois enviados
+        
+        2. **Nota de Venda para Entrega Futura**:
+           - Quando um produto é armazenado, geramos uma nota fiscal de "venda para entrega futura"
+           - Esta nota é emitida no momento do armazenamento
+        
+        3. **Nota de Brinde para Cliente Final**:
+           - Após a emissão da nota de venda futura, quando o produto é enviado ao cliente final
+           - Geramos uma nota fiscal de brinde para o cliente final que receberá o produto
+           - Esta nota fecha o ciclo da nota fiscal original
+        
+        4. **Armazenamento na Logística**:
+           - O produto fica armazenado na logística da Yoobe até o envio
+        
+        5. **Pagamento do DIFAL**:
+           - O DIFAL é pago no momento do envio do produto
+           - É calculado e pago pela Yoobe
+        
+        6. **Reembolso do DIFAL**:
+           - O reembolso do DIFAL é realizado juntamente com a nota fiscal mensal dos serviços de logística e entregas
+           - Aparece na fatura mensal como reembolso
+        
+        O texto deve ser:
+        - Técnico mas acessível para o departamento financeiro
+        - Visualmente organizado com seções claras
+        - Explicar o fluxo completo do processo
+        - Destacar os momentos importantes (armazenamento, envio, reembolso)
+        - Máximo de 600 palavras
+        
+        **IMPORTANTE - Formato do Conteúdo:**
+        - NÃO inclua assinaturas, saudações finais
+        - NÃO use placeholders
+        - O conteúdo deve ser puramente informativo
+        - Use o nome "Yoobe" ao se referir à empresa
+        - Organize em seções numeradas ou com subtítulos
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+
+        const content = response.text;
+        contentCache.set(cacheKey, { content, timestamp: Date.now() });
+        return content;
+    } catch (error) {
+        console.error('Error generating ciclo nota fiscal explanation:', error);
+        return `# Ciclo de Notas Fiscais - Yoobe
+
+## 1. Serviços Mensais vs Produtos
+
+A Yoobe trabalha com dois tipos principais de cobrança:
+
+**Serviços Mensais**: Serviços de logística (armazenamento, envios, etc.) são cobrados mensalmente através de uma nota fiscal de serviços.
+
+**Produtos**: Produtos são armazenados e depois enviados, gerando um ciclo específico de notas fiscais.
+
+## 2. Nota de Venda para Entrega Futura
+
+Quando um produto é armazenado na logística da Yoobe, geramos uma nota fiscal de "venda para entrega futura". Esta nota é emitida no momento do armazenamento e representa a venda do produto que será entregue posteriormente.
+
+## 3. Nota de Brinde para Cliente Final
+
+Após a emissão da nota de venda futura, quando o produto é enviado ao cliente final, geramos uma nota fiscal de brinde para o cliente final que receberá o produto. Esta nota fecha o ciclo da nota fiscal original de venda futura.
+
+## 4. Armazenamento na Logística
+
+O produto permanece armazenado na logística da Yoobe até o momento do envio, quando então é processado e enviado ao cliente final.
+
+## 5. Pagamento do DIFAL
+
+O DIFAL (Diferencial de Alíquota do ICMS) é calculado e pago pela Yoobe no momento do envio do produto. Este imposto é calculado com base na origem e destino do envio.
+
+## 6. Reembolso do DIFAL
+
+O reembolso do DIFAL pago no momento do envio é realizado juntamente com a nota fiscal mensal dos serviços de logística e entregas. Este reembolso aparece na fatura mensal como um crédito, compensando o DIFAL pago anteriormente.`;
     }
 };
 

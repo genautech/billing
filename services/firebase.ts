@@ -1,6 +1,7 @@
 // FIX: Update Firebase imports to use the v8 compatibility layer.
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
+import 'firebase/compat/storage';
 
 // --- INSTRUCTIONS ---
 // 1. Go to your Firebase project console: https://console.firebase.google.com/
@@ -31,4 +32,7 @@ firebase.initializeApp(firebaseConfig);
 // Initialize Cloud Firestore and get a reference to the service
 const db = firebase.firestore();
 
-export { db };
+// Initialize Cloud Storage and get a reference to the service
+const storage = firebase.storage();
+
+export { db, storage };

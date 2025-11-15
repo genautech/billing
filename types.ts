@@ -62,6 +62,9 @@ export interface CobrancaMensal {
     urlPlanilhaConferencia?: string; // Link to a verification spreadsheet or other documents
     relatorioRastreioCSV?: string; // Renamed from relatorioEnviosCSV
     relatorioCustosCSV?: string; // Added for audit purposes
+    notaFiscalUrl?: string; // URL do arquivo no Storage
+    notaFiscalFileName?: string; // Nome original do arquivo
+    explicacaoNotaFiscal?: string; // Explicação gerada pelo Gemini
 }
 
 export interface DetalheEnvio {
@@ -98,4 +101,23 @@ export interface GeneralSettings {
     id: 'general'; // Singleton document
     logoUrl?: string;
     contactEmail?: string;
+    paymentBankName?: string;
+    paymentBankAgency?: string;
+    paymentBankAccount?: string;
+    paymentBankAccountType?: string; // 'corrente' | 'poupanca'
+    paymentPixKey?: string;
+    paymentContactName?: string;
+    paymentContactEmail?: string;
+    paymentContactPhone?: string;
+}
+
+export interface DocumentoPedido {
+    id: string;
+    cobrancaId: string;
+    clienteId: string;
+    mesReferencia: string;
+    fileName: string;
+    fileUrl: string;
+    uploadDate: string;
+    tipo: 'pedido' | 'nota-fiscal';
 }
