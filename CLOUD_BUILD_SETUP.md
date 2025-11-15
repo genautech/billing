@@ -2,6 +2,13 @@
 
 Este guia passo a passo irá ajudá-lo a configurar o deploy automático usando Cloud Build.
 
+## ✅ Status Atual
+
+- **Projeto GCP**: `gen-lang-client-0296053913`
+- **Trigger**: `deploy-billing-app` ✅ Configurado
+- **Repositório**: `genautech/billing` ✅ Conectado
+- **Deploy Automático**: ✅ Funcionando - qualquer push para `main` dispara deploy
+
 ## Pré-requisitos
 
 1. **Conta Google Cloud Platform** com projeto criado
@@ -38,9 +45,11 @@ Execute o script de configuração:
 O script irá:
 - ✅ Habilitar APIs necessárias
 - ✅ Criar secret no Secret Manager (opcional)
-- ✅ Configurar permissões
+- ✅ Configurar permissões para Cloud Build e Cloud Run
 
 **OU** configure manualmente seguindo os passos abaixo.
+
+**Nota**: O script já foi executado e tudo está configurado. Use este guia apenas para referência ou para reconfigurar em outro projeto.
 
 ## Passo 3: Habilitar APIs Necessárias
 
@@ -61,7 +70,7 @@ gcloud services enable \
 5. Selecione o repositório: `genautech/billing`
 6. Clique em **"Connect"**
 
-## Passo 5: Criar Secret no Secret Manager (Recomendado)
+## Passo 5: Criar Secret no Secret Manager (Recomendado) ✅ JÁ CONFIGURADO
 
 Para maior segurança, use o Secret Manager:
 
@@ -69,16 +78,26 @@ Para maior segurança, use o Secret Manager:
 # Criar o secret
 echo -n "sua_gemini_api_key_aqui" | gcloud secrets create gemini-api-key \
   --data-file=- \
-  --replication-policy="automatic"
+  --replication-policy="automatic" \
+  --project=gen-lang-client-0296053913
 
 # Obter número do projeto
-PROJECT_NUMBER=$(gcloud projects describe $(gcloud config get-value project) --format="value(projectNumber)")
+PROJECT_NUMBER=$(gcloud projects describe gen-lang-client-0296053913 --format="value(projectNumber)")
 
 # Dar permissão ao Cloud Build para acessar o secret
 gcloud secrets add-iam-policy-binding gemini-api-key \
   --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \
-  --role="roles/secretmanager.secretAccessor"
+  --role="roles/secretmanager.secretAccessor" \
+  --project=gen-lang-client-0296053913
+
+# IMPORTANTE: Dar permissão também ao Cloud Run
+gcloud secrets add-iam-policy-binding gemini-api-key \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor" \
+  --project=gen-lang-client-0296053913
 ```
+
+**Nota**: Ambas as service accounts (Cloud Build e Cloud Run) precisam ter acesso ao secret!
 
 ## Passo 6: Atualizar cloudbuild.yaml para usar Secret Manager
 
