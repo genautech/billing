@@ -8,13 +8,36 @@ Sistema de faturamento e gestão de cobranças para logística, desenvolvido com
 
 ## Características
 
-- 📊 Dashboard administrativo completo
-- 💰 Geração automática de faturas mensais
-- 📄 Exportação de PDFs completos (faturas e documentação)
-- 🤖 Análise inteligente de faturas com IA (Gemini)
-- 👥 Portal do cliente com visualização de faturas
-- 📈 Relatórios e análises detalhadas
+### Área Administrativa
+- 📊 Dashboard administrativo completo com métricas e gráficos
+- 👥 Gestão completa de clientes (CRUD)
+- 💰 Geração automática de faturas mensais a partir de CSVs
+- 🤖 Análise inteligente com IA (Gemini) antes e depois do processamento
+- 📋 Gestão de tabelas de preços (global e por cliente)
+- 📦 Upload e processamento de CSVs (Track Report e Order Detail)
+- 🔄 Matching dinâmico de custos com tabela de preços
+- 📊 Arquivo de faturas com edição e gestão de status
+- ⚙️ Configurações gerais e gestão de FAQ
 - 🔐 Sistema de autenticação e controle de acesso
+
+### Portal do Cliente
+- 📊 Dashboard personalizado com métricas do cliente
+- 📄 Visualização detalhada de faturas
+- 📄 Exportação de PDFs completos (todos os pedidos expandidos)
+- 📄 Exportação de CSV para análise
+- 🤖 Análise inteligente de faturas com IA
+- 📈 Relatórios de envios e análises geográficas
+- 💰 Calculadora de custos interativa
+- 📚 Documentação completa "Como Funciona" com PDF exportável
+- ❓ Central de ajuda e FAQ
+- 🔍 Busca e filtros avançados
+
+### Funcionalidades Técnicas
+- 🚀 Deploy automático no Google Cloud Run
+- 🔐 Secret Manager para API keys
+- 📦 Containerização com Docker e Nginx
+- 🔄 CI/CD completo com Cloud Build
+- 📱 Design responsivo (desktop, tablet, mobile)
 
 ## Tecnologias
 
@@ -94,7 +117,14 @@ O sistema cria automaticamente um usuário admin na primeira execução:
 
 ## Deploy para Produção
 
-### Opção 1: Deploy no Google Cloud Run (Recomendado)
+### ✅ Status Atual
+
+- **URL de Produção**: https://billing-app-saisynpc3a-uc.a.run.app
+- **Projeto GCP**: `gen-lang-client-0296053913`
+- **Deploy Automático**: ✅ Configurado - qualquer push para `main` dispara deploy automático
+- **Documentação Completa**: Veja [DEPLOY.md](./DEPLOY.md) para instruções detalhadas
+
+### Opção 1: Deploy no Google Cloud Run (Recomendado) ✅ CONFIGURADO
 
 #### Pré-requisitos
 
@@ -237,12 +267,25 @@ billing/
 
 - ⚠️ **Importante**: As configurações do Firebase estão atualmente hardcoded em `services/firebase.ts`
 - 🔐 Para produção, considere mover as credenciais do Firebase para variáveis de ambiente
-- 🔑 A API key do Gemini deve ser configurada como secret no Cloud Run
-- 🛡️ Configure as regras de segurança do Firestore adequadamente
+- 🔑 A API key do Gemini está configurada como secret no Cloud Run (Secret Manager)
+- 🛡️ Configure as regras de segurança do Firestore adequadamente (veja [FIREBASE_SETUP.md](./FIREBASE_SETUP.md))
+- 🔒 Secret Manager configurado para armazenar API keys de forma segura
+- 🌐 Acesso público configurado no Cloud Run (pode ser restrito se necessário)
+
+## Documentação Adicional
+
+- **[DEPLOY.md](./DEPLOY.md)**: Guia completo de deploy no Cloud Run
+- **[CLOUD_BUILD_SETUP.md](./CLOUD_BUILD_SETUP.md)**: Configuração do deploy automático
+- **[FIREBASE_SETUP.md](./FIREBASE_SETUP.md)**: Configuração e verificações do Firebase
+- **[FEATURES.md](./FEATURES.md)**: Documentação completa de todas as funcionalidades
+- **[TROUBLESHOOTING.md](./TROUBLESHOOTING.md)**: Guia de resolução de problemas
 
 ## Suporte
 
-Para dúvidas ou problemas, abra uma issue no repositório GitHub.
+Para dúvidas ou problemas:
+1. Consulte a documentação acima
+2. Verifique [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) para problemas comuns
+3. Abra uma issue no repositório GitHub com detalhes do problema
 
 ## Licença
 

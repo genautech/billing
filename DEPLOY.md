@@ -2,6 +2,15 @@
 
 Este documento contém instruções detalhadas para fazer deploy da aplicação no Google Cloud Run.
 
+## ✅ Status Atual do Deploy
+
+- **Projeto GCP**: `gen-lang-client-0296053913`
+- **Serviço**: `billing-app`
+- **Região**: `us-central1`
+- **URL de Produção**: https://billing-app-saisynpc3a-uc.a.run.app
+- **Deploy Automático**: ✅ Configurado (trigger: `deploy-billing-app`)
+- **Secret Manager**: ✅ Configurado (`gemini-api-key`)
+
 ## Pré-requisitos
 
 1. **Conta Google Cloud Platform** com projeto criado
@@ -10,6 +19,7 @@ Este documento contém instruções detalhadas para fazer deploy da aplicação 
    - Cloud Run API
    - Container Registry API
    - Cloud Build API (se usar Cloud Build)
+   - Secret Manager API
 
 ## Opção 1: Deploy Automático com Cloud Build
 
@@ -216,22 +226,50 @@ gcloud run services logs read billing-app \
 
 ## Troubleshooting
 
-### Erro: "Permission denied"
+Para problemas detalhados e soluções, consulte o arquivo [TROUBLESHOOTING.md](./TROUBLESHOOTING.md).
+
+### Erros Comuns
+
+#### Erro: "Permission denied"
 - Verifique se as APIs estão habilitadas
 - Verifique se você tem as permissões necessárias (Cloud Run Admin, Service Account User)
+- **Solução específica**: Verifique se ambas as service accounts (Cloud Build e Cloud Run) têm permissão no Secret Manager
 
-### Erro: "Image not found"
+#### Erro: "Container failed to start and listen on PORT"
+- **Causa**: Nginx não está escutando na porta correta
+- **Solução**: Já corrigido no código atual - o `entrypoint.sh` configura a porta dinamicamente
+- **Verificar**: Certifique-se de que o `Dockerfile` usa o `entrypoint.sh`
+
+#### Erro: "Setting IAM policy failed" / HTTP 403
+- **Causa**: Serviço não tem acesso público configurado
+- **Solução**: Já configurado automaticamente no `cloudbuild.yaml`
+- **Manual**: Execute `gcloud run services add-iam-policy-binding billing-app --region=us-central1 --member="allUsers" --role="roles/run.invoker"`
+
+#### Erro: "Image not found"
 - Verifique se a imagem foi construída e enviada corretamente
 - Verifique o nome do projeto no caminho da imagem
+- Verifique os logs do Cloud Build
 
-### Erro: "API key not found"
-- Verifique se a variável de ambiente `GEMINI_API_KEY` está configurada
-- Verifique se o secret existe e tem as permissões corretas
+#### Erro: "API key not found" ou "Permission denied on secret"
+- Verifique se o secret `gemini-api-key` existe: `gcloud secrets list`
+- Verifique se as service accounts têm permissão:
+  ```bash
+  PROJECT_NUMBER=$(gcloud projects describe YOUR_PROJECT_ID --format="value(projectNumber)")
+  # Cloud Build
+  gcloud secrets add-iam-policy-binding gemini-api-key \
+    --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \
+    --role="roles/secretmanager.secretAccessor"
+  # Cloud Run
+  gcloud secrets add-iam-policy-binding gemini-api-key \
+    --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+    --role="roles/secretmanager.secretAccessor"
+  ```
 
-### App não carrega
+#### App não carrega
 - Verifique os logs do Cloud Run
 - Verifique se o Firebase está configurado corretamente
 - Verifique se o build foi feito corretamente (verifique a pasta `dist/`)
+- Verifique se o serviço está acessível publicamente
 
 ## Custos Estimados
 
@@ -242,13 +280,28 @@ Com as configurações recomendadas:
 
 Para um app com tráfego moderado, os custos devem ser muito baixos (menos de $10/mês).
 
+## Problemas Resolvidos Durante o Deploy Inicial
+
+### 1. Permissões do Secret Manager
+**Problema**: Service account do Cloud Run não tinha acesso ao secret.
+**Solução**: Configuradas permissões para ambas as service accounts (Cloud Build e Cloud Run).
+
+### 2. Porta do Nginx
+**Problema**: Nginx escutava na porta 80, mas Cloud Run espera a porta da variável `PORT`.
+**Solução**: Criado `entrypoint.sh` que configura a porta dinamicamente.
+
+### 3. Acesso Público
+**Problema**: Serviço retornava 403 (Forbidden).
+**Solução**: Adicionado passo no `cloudbuild.yaml` para configurar acesso público automaticamente.
+
 ## Próximos Passos
 
-1. Configurar domínio customizado (opcional)
-2. Configurar SSL/TLS (automático com Cloud Run)
-3. Configurar monitoramento e alertas
-4. Configurar CI/CD completo
-5. Mover configurações do Firebase para variáveis de ambiente
+1. ✅ Deploy automático configurado
+2. ✅ Secret Manager integrado
+3. ✅ Acesso público configurado
+4. ⏳ Configurar domínio customizado (opcional)
+5. ⏳ Configurar monitoramento e alertas
+6. ⏳ Mover configurações do Firebase para variáveis de ambiente (futuro)
 
 ## Links Úteis
 
