@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { Cliente } from '../types';
-import { generateBillingExplanationContent, generateDIFALExplanation } from '../services/geminiContentService';
+import { generateBillingExplanationContent, generateDIFALExplanation, generateProcessoNotasFiscaisExplanation } from '../services/geminiContentService';
 import TaxationInfographic from './TaxationInfographic';
 import CostCalculator from './CostCalculator';
 import MarkdownRenderer from './MarkdownRenderer';
+import NotaFiscalModelViewer from './NotaFiscalModelViewer';
+import ProcessoNotasFiscaisFlow from './ProcessoNotasFiscaisFlow';
 
 // These will be available on the window object from the CDN scripts
 declare const jspdf: any;
@@ -16,8 +18,10 @@ interface ClientBillingExplanationViewProps {
 const ClientBillingExplanationView: React.FC<ClientBillingExplanationViewProps> = ({ cliente }) => {
     const [billingExplanation, setBillingExplanation] = useState<string>('');
     const [difalExplanation, setDifalExplanation] = useState<string>('');
+    const [processoNotasFiscaisExplanation, setProcessoNotasFiscaisExplanation] = useState<string>('');
     const [isLoadingBilling, setIsLoadingBilling] = useState(true);
     const [isLoadingDifal, setIsLoadingDifal] = useState(true);
+    const [isLoadingProcessoNotasFiscais, setIsLoadingProcessoNotasFiscais] = useState(true);
     const [isPdfLoading, setIsPdfLoading] = useState(false);
     const pdfContentRef = useRef<HTMLDivElement>(null);
 
@@ -25,18 +29,22 @@ const ClientBillingExplanationView: React.FC<ClientBillingExplanationViewProps> 
         const loadContent = async () => {
             setIsLoadingBilling(true);
             setIsLoadingDifal(true);
+            setIsLoadingProcessoNotasFiscais(true);
             try {
-                const [billing, difal] = await Promise.all([
+                const [billing, difal, processoNotasFiscais] = await Promise.all([
                     generateBillingExplanationContent(),
-                    generateDIFALExplanation()
+                    generateDIFALExplanation(),
+                    generateProcessoNotasFiscaisExplanation()
                 ]);
                 setBillingExplanation(billing);
                 setDifalExplanation(difal);
+                setProcessoNotasFiscaisExplanation(processoNotasFiscais);
             } catch (error) {
                 console.error('Error loading explanation content:', error);
             } finally {
                 setIsLoadingBilling(false);
                 setIsLoadingDifal(false);
+                setIsLoadingProcessoNotasFiscais(false);
             }
         };
         loadContent();
@@ -133,7 +141,7 @@ const ClientBillingExplanationView: React.FC<ClientBillingExplanationViewProps> 
             <div className="bg-white p-4 rounded-lg shadow-md flex justify-end">
                 <button 
                     onClick={handleGeneratePDF} 
-                    disabled={isPdfLoading || isLoadingBilling || isLoadingDifal}
+                    disabled={isPdfLoading || isLoadingBilling || isLoadingDifal || isLoadingProcessoNotasFiscais}
                     className="flex items-center justify-center space-x-2 text-white px-4 py-2 rounded-md shadow-sm font-medium transition-colors bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-sm"
                 >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -202,6 +210,30 @@ const ClientBillingExplanationView: React.FC<ClientBillingExplanationViewProps> 
                 <TaxationInfographic />
             </div>
 
+            {/* Seção: Processo de Emissão de Notas Fiscais no Envio */}
+            <div className="bg-white p-6 rounded-lg shadow-md">
+                <h3 className="text-2xl font-bold text-gray-900 mb-4">Processo de Emissão de Notas Fiscais no Envio</h3>
+                
+                {isLoadingProcessoNotasFiscais ? (
+                    <div className="text-center text-gray-500 py-8">
+                        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                        <p className="mt-2">Gerando explicação do processo...</p>
+                    </div>
+                ) : (
+                    <div className="bg-gradient-to-br from-gray-50 to-white rounded-lg p-6 border border-gray-200 mb-6">
+                        <MarkdownRenderer content={processoNotasFiscaisExplanation} />
+                    </div>
+                )}
+
+                {/* Fluxo Visual */}
+                <ProcessoNotasFiscaisFlow />
+
+                {/* Modelos de Notas Fiscais */}
+                <div className="mt-6">
+                    <NotaFiscalModelViewer />
+                </div>
+            </div>
+
             {/* Seção: Transparência no Processo */}
             <div className="bg-white p-6 rounded-lg shadow-md">
                 <h3 className="text-2xl font-bold text-gray-900 mb-4">Transparência no Processo de Envio</h3>
@@ -220,11 +252,16 @@ const ClientBillingExplanationView: React.FC<ClientBillingExplanationViewProps> 
                     <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                         <h4 className="font-semibold text-gray-800 mb-2 flex items-center">
                             <span className="mr-2">🧮</span>
-                            Geração Automática do DIFAL
+                            Geração e Pagamento Automático do DIFAL
                         </h4>
                         <p className="text-gray-700 text-sm">
                             O DIFAL é calculado automaticamente pelo sistema baseado na origem (nossa localização) e destino (CEP do cliente final). 
                             O cálculo considera as alíquotas de ICMS de ambos os estados e aplica a diferença quando necessário.
+                        </p>
+                        <p className="text-gray-700 text-sm mt-2">
+                            <strong>Pagamento Automático:</strong> O valor do DIFAL é automaticamente cobrado e pago pela Yoobe utilizando um gateway de pagamento integrado. 
+                            O sistema cobra uma taxa fixa que é depois cobrada na fatura mensal, de acordo com a tabela de preços. 
+                            Não é necessário nenhuma ação pela empresa cliente - todo o processo é automatizado.
                         </p>
                     </div>
 

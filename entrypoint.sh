@@ -9,3 +9,7 @@ sed -i "s/listen 80;/listen ${PORT};/g" /etc/nginx/conf.d/default.conf
 # Iniciar nginx
 exec nginx -g "daemon off;"
 
+
+
+
+

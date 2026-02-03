@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { TabelaPrecoItem, Cliente } from '../types';
-import { getTabelaPrecos, getLastInvoiceStorageQuantities } from '../services/firestoreService';
+import { getTabelaPrecos, getLastInvoiceStorageQuantities, getCostCategoryGroup } from '../services/firestoreService';
 import { generateCalculatorInsights } from '../services/geminiContentService';
 import MarkdownRenderer from './MarkdownRenderer';
 
@@ -57,7 +57,7 @@ const CostCalculator: React.FC<CostCalculatorProps> = ({ cliente }) => {
     // Encontrar preços de armazenagem
     const precoArmazenagemPallet = useMemo(() => {
         const item = tabelaPrecos.find(p => 
-            p.categoria === 'Armazenamento' && 
+            getCostCategoryGroup(p.categoria) === 'armazenagem' && 
             (p.descricao.toLowerCase().includes('pallet') || p.metrica.toLowerCase().includes('pallet'))
         );
         return item?.precoVenda || 0;
@@ -65,7 +65,7 @@ const CostCalculator: React.FC<CostCalculatorProps> = ({ cliente }) => {
 
     const precoArmazenagemBin = useMemo(() => {
         const item = tabelaPrecos.find(p => 
-            p.categoria === 'Armazenamento' && 
+            getCostCategoryGroup(p.categoria) === 'armazenagem' && 
             (p.descricao.toLowerCase().includes('bin') || p.metrica.toLowerCase().includes('bin'))
         );
         return item?.precoVenda || 0;

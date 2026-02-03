@@ -2,18 +2,19 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { getTabelaPrecos, getFaqs } from '../services/firestoreService';
 import type { TabelaPrecoItem, FaqItem } from '../types';
+import MarkdownRenderer from './MarkdownRenderer';
 
 const FaqAccordionItem: React.FC<{ faq: FaqItem }> = ({ faq }) => {
     const [isOpen, setIsOpen] = useState(false);
     return (
-        <div className="border-b border-gray-200">
+        <div className="border-b border-gray-200 last:border-b-0">
             <button
                 onClick={() => setIsOpen(!isOpen)}
-                className="flex justify-between items-center w-full p-4 text-left transition-colors duration-200 hover:bg-gray-50"
+                className="flex justify-between items-center w-full p-5 text-left transition-colors duration-200 hover:bg-gray-50 rounded-t-lg"
             >
-                <span className="font-semibold text-gray-800">{faq.pergunta}</span>
+                <span className="font-semibold text-gray-900 text-base pr-4">{faq.pergunta}</span>
                 <svg
-                    className={`w-5 h-5 text-gray-500 transform transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                    className={`w-5 h-5 text-gray-500 flex-shrink-0 transform transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -22,8 +23,13 @@ const FaqAccordionItem: React.FC<{ faq: FaqItem }> = ({ faq }) => {
                 </svg>
             </button>
             {isOpen && (
-                <div className="p-4 pt-0 animate-fade-in">
-                    <p className="text-gray-600 whitespace-pre-wrap leading-relaxed">{faq.resposta}</p>
+                <div className="px-5 pb-5 pt-2 bg-gray-50 border-t border-gray-100 animate-fade-in">
+                    <div className="prose prose-sm max-w-none">
+                        <MarkdownRenderer 
+                            content={faq.resposta} 
+                            className="text-gray-700 leading-relaxed"
+                        />
+                    </div>
                 </div>
             )}
         </div>
@@ -132,8 +138,14 @@ const LandingPage: React.FC = () => {
                 
                 <section id="faq">
                      <h2 className="text-3xl font-bold text-center text-gray-900">Perguntas Frequentes</h2>
-                     <div className="mt-6 bg-white rounded-lg shadow-md">
-                        {faqs.map(faq => <FaqAccordionItem key={faq.id} faq={faq} />)}
+                     <div className="mt-6 bg-white rounded-lg shadow-md border border-gray-200 overflow-hidden">
+                        {faqs.length > 0 ? (
+                            faqs.map(faq => <FaqAccordionItem key={faq.id} faq={faq} />)
+                        ) : (
+                            <div className="p-8 text-center">
+                                <p className="text-gray-500">Nenhuma pergunta frequente disponível.</p>
+                            </div>
+                        )}
                      </div>
                 </section>
 

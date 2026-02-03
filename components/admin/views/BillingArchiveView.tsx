@@ -1,5 +1,20 @@
 import React, { useState, useMemo } from 'react';
-import { getDetalhesByCobrancaId, getCustosAdicionaisByCobrancaId, generateInvoiceAnalysis, deleteCobranca, salvarCobrancaEditada, updateCobrancaStatus, calculatePrecoVenda, calculatePrecoVendaForDisplay, isTemplateItem, getShareableUrl, uploadFileToStorage, updateCobrancaWithNotaFiscal, deleteFileFromStorage } from '../../../services/firestoreService';
+import { 
+    getDetalhesByCobrancaId, 
+    getCustosAdicionaisByCobrancaId, 
+    generateInvoiceAnalysis, 
+    deleteCobranca, 
+    salvarCobrancaEditada, 
+    updateCobrancaStatus, 
+    calculatePrecoVenda, 
+    calculatePrecoVendaForDisplay, 
+    isTemplateItem, 
+    getShareableUrl, 
+    uploadFileToStorage, 
+    updateCobrancaWithNotaFiscal, 
+    deleteFileFromStorage,
+    getCostCategoryGroup 
+} from '../../../services/firestoreService';
 import type { CobrancaMensal, Cliente, TabelaPrecoItem, DetalheEnvio, CustoAdicional } from '../../../types';
 import { useToast } from '../../../contexts/ToastContext';
 import { FormInput, FormSelect } from '../../ui/FormControls';
@@ -17,6 +32,7 @@ interface EditInvoiceModalProps {
 }
 
 const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, onSave, cobranca: initialCobranca, cliente, tabelaPrecos }) => {
+    const manualCostCategories: NonNullable<CustoAdicional['categoria']>[] = ['Armazenagem', 'Maquila/Entrada', 'Estoque', 'Logístico', 'Outro'];
     const [cobranca, setCobranca] = useState<CobrancaMensal>(initialCobranca);
     const [detalhes, setDetalhes] = useState<DetalheEnvio[]>([]);
     const [custosAdicionais, setCustosAdicionais] = useState<CustoAdicional[]>([]);
@@ -33,14 +49,15 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
         let totalArmazenagem = 0;
         let totalCustosLogisticos = 0;
         let custoTotalItens = 0;
-        const envioCats = ['Envios', 'Retornos'];
 
         currentDetalhes.forEach(detalhe => {
             if (!detalhe.tabelaPrecoItemId) return;
             const itemPreco = tabelaPrecos.find(c => c.id === detalhe.tabelaPrecoItemId);
             if (itemPreco) {
                 // Special handling for non-template shipping items
-                const isShippingItem = envioCats.includes(itemPreco.categoria);
+                // Use getCostCategoryGroup for consistent category matching
+                const group = getCostCategoryGroup(itemPreco.categoria);
+                const isShippingItem = group === 'envio';
                 const isTemplate = isTemplateItem(itemPreco);
                 const isNonTemplateShipping = isShippingItem && !isTemplate;
                 
@@ -64,9 +81,10 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
                 const subtotalCusto = isPassThrough ? detalhe.quantidade : (isNonTemplateShipping ? detalhe.quantidade : itemPreco.custoUnitario * detalhe.quantidade);
                 custoTotalItens += subtotalCusto;
 
-                if (itemPreco.categoria === 'Armazenamento') {
+                // Use already calculated 'group' variable for categorization
+                if (group === 'armazenagem') {
                     totalArmazenagem += subtotalVenda;
-                } else if (envioCats.includes(itemPreco.categoria)) {
+                } else if (group === 'envio') {
                     totalEnvio += subtotalVenda;
                 } else {
                     totalCustosLogisticos += subtotalVenda;
@@ -148,6 +166,7 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
             id: `new_custo_${Date.now()}`,
             descricao: '',
             valor: 0,
+            categoria: 'Outro'
         };
         const newCustos = [...custosAdicionais, newCusto];
         setCustosAdicionais(newCustos);
@@ -237,7 +256,13 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
                                 </div>
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-5 gap-4 mb-6">
-                                <div className="bg-gray-100 p-4 rounded-lg"><p className="text-sm text-gray-600">Total Envios</p><p className="text-xl font-bold">{formatCurrency(cobranca.totalEnvio)}</p></div>
+                                <div className="bg-gray-100 p-4 rounded-lg">
+                                    <p className="text-sm text-gray-600">Total Envios</p>
+                                    <p className="text-xl font-bold">{formatCurrency(cobranca.totalEnvio)}</p>
+                                    {cobranca.quantidadeEnvios !== undefined && cobranca.quantidadeEnvios > 0 && (
+                                        <p className="text-xs text-gray-500 mt-1">{cobranca.quantidadeEnvios} envio(s)</p>
+                                    )}
+                                </div>
                                 <div className="bg-gray-100 p-4 rounded-lg"><p className="text-sm text-gray-600">Total Logística</p><p className="text-xl font-bold">{formatCurrency(cobranca.totalCustosLogisticos)}</p></div>
                                 <div className="bg-gray-100 p-4 rounded-lg"><p className="text-sm text-gray-600">Total Armazenagem</p><p className="text-xl font-bold">{formatCurrency(cobranca.totalArmazenagem)}</p></div>
                                 <div className="bg-gray-100 p-4 rounded-lg"><p className="text-sm text-gray-600">Custos Adicionais</p><p className="text-xl font-bold">{formatCurrency(cobranca.totalCustosAdicionais || 0)}</p></div>
@@ -298,6 +323,13 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
                                     {custosAdicionais.map((custo) => (
                                         <div key={custo.id} className="flex items-center gap-2 p-2 bg-gray-50 rounded-md">
                                             <FormInput type="text" value={custo.descricao} onChange={(e) => handleCustoAdicionalChange(custo.id, 'descricao', e.target.value)} placeholder="Descrição do Custo" className="flex-grow text-sm"/>
+                                            <FormSelect
+                                                value={custo.categoria || 'Outro'}
+                                                onChange={(e) => handleCustoAdicionalChange(custo.id, 'categoria', e.target.value)}
+                                                className="w-40 text-sm"
+                                            >
+                                                {manualCostCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                                            </FormSelect>
                                             <FormInput type="number" value={custo.valor} onChange={(e) => handleCustoAdicionalChange(custo.id, 'valor', e.target.value)} placeholder="Valor (R$)" className="w-32 text-sm text-right" step="0.01"/>
                                             <button type="button" onClick={() => handleDeleteCustoAdicional(custo.id)} className="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100"><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg></button>
                                         </div>

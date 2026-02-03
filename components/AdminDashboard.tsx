@@ -36,17 +36,29 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminUser, settings, fa
     
     const fetchData = async () => {
         setLoading(true);
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/a9ef296b-8240-4113-a518-0e1e56e2ff45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AdminDashboard.tsx:fetchData:start',message:'Iniciando fetchData',data:{loading:true},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
+        // #endregion
         try {
             const [precosData, cobrancasData, clientesData] = await Promise.all([
                 getTabelaPrecos(), getCobrancasMensais(), getClientes()
             ]);
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/a9ef296b-8240-4113-a518-0e1e56e2ff45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AdminDashboard.tsx:fetchData:success',message:'Dados carregados com sucesso',data:{precosCount:precosData.length,cobrancasCount:cobrancasData.length,clientesCount:clientesData.length,sampleClientes:clientesData.slice(0,3).map(c=>({id:c.id,nome:c.nome}))},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H2'})}).catch(()=>{});
+            // #endregion
             setTabelaPrecos(precosData);
             setCobrancas(cobrancasData);
             setClientes(clientesData);
         } catch (error) {
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/a9ef296b-8240-4113-a518-0e1e56e2ff45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AdminDashboard.tsx:fetchData:error',message:'Erro ao carregar dados',data:{error:String(error)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
+            // #endregion
             console.error("Failed to fetch initial data:", error);
             addToast("Não foi possível carregar os dados. Verifique a configuração do Firebase e sua conexão.", 'error');
         } finally {
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/a9ef296b-8240-4113-a518-0e1e56e2ff45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AdminDashboard.tsx:fetchData:finally',message:'fetchData finalizado',data:{loading:false},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
+            // #endregion
             setLoading(false);
         }
     };
@@ -73,6 +85,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminUser, settings, fa
     );
     
     const renderView = () => {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/a9ef296b-8240-4113-a518-0e1e56e2ff45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AdminDashboard.tsx:renderView',message:'Renderizando view',data:{view,clientesCount:clientes.length,tabelaPrecosCount:tabelaPrecos.length,cobrancasCount:cobrancas.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H5'})}).catch(()=>{});
+        // #endregion
         switch (view) {
             case 'dashboard': return <DashboardView cobrancas={cobrancas} clientes={clientes} />;
             case 'clients': return <ClientManagementView clientes={clientes} onUpdate={fetchData} />;

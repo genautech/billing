@@ -151,9 +151,9 @@ const ClientPriceTableManagementView: React.FC = () => {
     };
 
     const handleEditItem = (item: TabelaPrecoItem, index: number) => {
-        // Criar uma cópia do item com um ID temporário baseado no índice para validação
-        const itemWithTempId = { ...item, id: `temp-${index}` };
-        setEditingItem(itemWithTempId);
+        // PRESERVE the original ID - don't replace with temp ID
+        // The ID should match the global table for consistency
+        setEditingItem({ ...item });
         setEditingItemIndex(index);
         setIsModalOpen(true);
     };
@@ -262,6 +262,35 @@ const ClientPriceTableManagementView: React.FC = () => {
             };
             
             const parsedData = parseCSV(csvContent);
+            
+            // Helper function to find matching item in global table by description + categoria
+            const findGlobalItemId = (descricao: string, categoria: string): string | null => {
+                const normalizedDesc = descricao.toLowerCase().trim();
+                const normalizedCat = categoria.toLowerCase().trim();
+                
+                // First try exact match
+                const exactMatch = tabelaPadrao.find(item => 
+                    item.descricao.toLowerCase().trim() === normalizedDesc &&
+                    item.categoria.toLowerCase().trim() === normalizedCat
+                );
+                if (exactMatch) return exactMatch.id;
+                
+                // Then try matching by description only (more flexible)
+                const descMatch = tabelaPadrao.find(item => 
+                    item.descricao.toLowerCase().trim() === normalizedDesc
+                );
+                if (descMatch) return descMatch.id;
+                
+                // Try partial match on description
+                const partialMatch = tabelaPadrao.find(item => 
+                    item.descricao.toLowerCase().includes(normalizedDesc) ||
+                    normalizedDesc.includes(item.descricao.toLowerCase())
+                );
+                if (partialMatch) return partialMatch.id;
+                
+                return null;
+            };
+            
             const itens: TabelaPrecoItem[] = parsedData.map((row: any, index: number) => {
                 let custoUnitario = 0;
                 let precoVenda = 0;
@@ -269,6 +298,7 @@ const ClientPriceTableManagementView: React.FC = () => {
 
                 const custoStr = row['Custo Unitario'] || row['Custo Unitário'];
                 const precoStr = row['Preço Unitário'] || row['Preco Unitario'];
+                const margemStr = row['Margem de Lucro (%)'] || row['Margem de Lucro'] || row['Margem'];
 
                 if (custoStr) {
                     custoUnitario = parseFloat(custoStr.replace(',', '.')) || 0;
@@ -276,9 +306,14 @@ const ClientPriceTableManagementView: React.FC = () => {
                 if (precoStr) {
                     precoVenda = parseFloat(precoStr.replace(',', '.')) || 0;
                 }
+                if (margemStr) {
+                    margemLucro = parseFloat(margemStr.replace(',', '.').replace('%', '')) || 0;
+                }
 
-                if (custoUnitario > 0 && precoVenda > 0) {
+                if (custoUnitario > 0 && precoVenda > 0 && margemLucro === 0) {
                     margemLucro = ((precoVenda - custoUnitario) / custoUnitario) * 100;
+                } else if (custoUnitario > 0 && precoVenda === 0 && margemLucro > 0) {
+                    precoVenda = custoUnitario * (1 + margemLucro / 100);
                 } else if (custoUnitario > 0 && precoVenda === 0) {
                     precoVenda = custoUnitario;
                     margemLucro = 0;
@@ -286,12 +321,23 @@ const ClientPriceTableManagementView: React.FC = () => {
                     custoUnitario = precoVenda;
                     margemLucro = 0;
                 }
+                
+                const descricao = row['Descrição do Custo'] || row['Descrição'] || '';
+                const categoria = row['Categoria'] || '';
+                
+                // CRITICAL: Use ID from global table to maintain consistency
+                const globalItemId = findGlobalItemId(descricao, categoria);
+                const itemId = globalItemId || `custom-${Date.now()}-${index}`;
+                
+                if (!globalItemId) {
+                    console.warn(`⚠️ Item não encontrado na tabela global: "${descricao}" (${categoria}) - usando ID personalizado`);
+                }
 
                 return {
-                    id: `temp-${index}`,
-                    categoria: row['Categoria'] || '',
+                    id: itemId,
+                    categoria,
                     subcategoria: row['Subcategoria'] || '',
-                    descricao: row['Descrição do Custo'] || row['Descrição'] || '',
+                    descricao,
                     metrica: row['Métrica'] || row['Metrica'] || '',
                     custoUnitario,
                     margemLucro,

@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import type { TabelaPrecoItem } from '../types';
+import { calculatePrecoVendaForDisplay } from '../services/firestoreService';
 
 interface ClientPriceTableProps {
     tabelaPrecos: TabelaPrecoItem[];
@@ -10,12 +11,23 @@ const ClientPriceTable: React.FC<ClientPriceTableProps> = ({ tabelaPrecos }) => 
         return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
     };
 
-    // Filter out internal template items (priced at 1.00) and internal costs before display
+    const difalBanner = (
+        <div className="mb-4 p-3 rounded-md border border-purple-200 bg-purple-50 text-sm text-purple-800">
+            <strong>DIFAL:</strong> Cobrança mínima de R$ 3,00 por pedido (margem de 200% sobre custo base). XMLs de notas de remessa são apenas comprovantes de envio e não alteram o valor cobrado.
+        </div>
+    );
+
+    // Filter out internal template items (priced at 1.00 or 0.01) and internal costs before display
     const filteredPrecos = useMemo(() => 
-        tabelaPrecos.filter(item => 
-            item.precoVenda !== 1 && 
-            item.categoria !== 'Custos Internos'
-        ),
+        tabelaPrecos.filter(item => {
+            // Filter out template items (1.00 or 0.01)
+            if (item.precoVenda === 1 || item.precoVenda === 0.01) return false;
+            // Filter out internal costs category
+            if (item.categoria === 'Custos Internos') return false;
+            // Filter out items with (TP) in description
+            if (item.descricao && item.descricao.includes('(TP)')) return false;
+            return true;
+        }),
     [tabelaPrecos]);
 
     const groupedPrecos = filteredPrecos.reduce((acc, item) => {
@@ -48,6 +60,7 @@ const ClientPriceTable: React.FC<ClientPriceTableProps> = ({ tabelaPrecos }) => 
             <h3 className="text-xl font-bold text-gray-900 mb-4">
                 Tabela de Preços de Serviços
             </h3>
+            {difalBanner}
             <div className="space-y-10">
                 {sortedCategories.map(categoria => (
                     <div key={categoria}>
@@ -85,7 +98,7 @@ const ClientPriceTable: React.FC<ClientPriceTableProps> = ({ tabelaPrecos }) => 
                                                             </div>
                                                         </td>
                                                         <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500 text-right">{item.metrica}</td>
-                                                        <td className="px-4 py-4 whitespace-nowrap text-sm text-blue-600 font-semibold text-right">{formatCurrency(item.precoVenda)}</td>
+                                                        <td className="px-4 py-4 whitespace-nowrap text-sm text-blue-600 font-semibold text-right">{formatCurrency(calculatePrecoVendaForDisplay(item))}</td>
                                                     </tr>
                                                 ))}
                                             </tbody>

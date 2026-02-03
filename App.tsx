@@ -136,6 +136,8 @@ const AppContent: React.FC = () => {
         }
     }, [isLoading, shareLinkProcessed, processShareLink]);
 
+    // Auto-login removed for security reasons - users must authenticate explicitly
+
     useEffect(() => {
         const handleToastEvent = (e: Event) => {
             const { message, type } = (e as CustomEvent).detail;

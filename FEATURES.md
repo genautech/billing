@@ -31,22 +31,88 @@ Sistema completo de gestão de faturamento e cobranças para logística, com int
 ### Geração de Faturas
 
 - **Processamento automático de CSVs**
-  - Upload de relatórios de rastreio (Track Report)
-  - Upload de relatórios de custos (Order Detail)
-  - Matching automático entre relatórios
+  - Order Detail (custos) **obrigatório**
+  - Track Report (rastreio) **opcional**: se não enviado, a fatura é gerada apenas com o Order Detail; rastreio pode ficar vazio e relatórios por estado dependem da coluna de UF no Order Detail.
+  - Matching automático entre relatórios (quando ambos existem)
+  - Filtragem automática por mês de referência
+- **Resumo Pré-Aprovação** ✨ **NOVO**
+  - Exibe resumo detalhado antes de salvar a fatura
+  - Mostra total de pedidos, envios, DIFAL, armazenagem e outros custos separadamente
+  - Indica qual tabela de preços está sendo utilizada (Cliente ou Global)
+  - Lista avisos e pedidos sem correspondência
+  - Permite validação visual antes da confirmação
 - **Análise com IA (Gemini)**
-  - Análise inteligente dos dados antes de processar
+  - Requer Track Report para melhor qualidade de análise
   - Sugestões e validações automáticas
+  - Identificação de pedidos não correspondentes
 - **Matching dinâmico de custos**
   - Mapeamento automático de colunas CSV para tabela de preços
   - Suporte a templates e itens específicos
   - Cálculo automático de picking/packing baseado em quantidade de itens
+  - Priorização de itens não-template sobre templates
 - **Cálculo de DIFAL**
   - Cálculo automático baseado em origem e destino
   - Inclusão na fatura de forma transparente
+  - DIFAL associado diretamente a cada pedido
+  - Preço mínimo garantido de R$ 3,00 por pedido
 - **Custos adicionais**
   - Adicionar custos manuais à fatura
   - Descrição e valor customizáveis
+- **Validações e logs**
+  - Order Detail é obrigatório; Track Report opcional
+  - Logs extensivos em console para debug
+  - Alertas para colunas sem correspondência
+  - Bloqueio se mais de 50% das colunas de custo não tiverem match
+  - Bloqueio se valor total zerado com detalhes
+- **Tabela de Preços do Cliente**
+  - Sistema automaticamente utiliza tabela personalizada do cliente quando disponível
+  - Fallback para tabela global se cliente não tem tabela própria
+  - Indicação visual no resumo pré-aprovação
+
+#### Formato dos CSVs para Geração de Faturas
+
+**Track Report (Relatório de Rastreio) — opcional (requerido apenas se quiser rastreio e análise IA):**
+
+O sistema aceita dois formatos de Track Report:
+
+**Formato Legado:**
+
+| Coluna          | Obrigatório | Descrição                                    |
+| --------------- | ----------- | -------------------------------------------- |
+| Data de envio   | Sim         | Data do envio (formatos: YYYY-MM-DD, DD/MM/YYYY) |
+| Número do pedido| Sim         | ID único do pedido                          |
+| Rastreio        | Não         | Código de rastreamento                      |
+
+**Formato LojaPrio (detecção automática):**
+
+| Coluna          | Obrigatório | Descrição                                    |
+| --------------- | ----------- | -------------------------------------------- |
+| Number          | Sim         | ID único do pedido                          |
+| Email           | Sim         | Email do cliente (usado para matching)      |
+| Placed at       | Sim         | Data do pedido (formato: YYYY-MM-DD HH:MM:SS) |
+| Shipped at      | Não         | Data de envio (alternativa para data)       |
+| Status          | Não         | Status do pedido (ex: complete)             |
+
+**Matching para LojaPrio:**
+- O sistema detecta automaticamente o formato LojaPrio pelas colunas características
+- O matching principal é por número do pedido (Number)
+- Se não encontrar match por número, tenta matching por email + mês
+- A prioridade é sempre o mês: pedidos são agrupados pelo mês de referência solicitado
+- O número do pedido é usado como identificador de rastreio quando não há coluna de rastreio
+
+**Order Detail (Relatório de Custos) — obrigatório:**
+
+| Coluna           | Obrigatório | Descrição                                |
+| ---------------- | ----------- | ---------------------------------------- |
+| Data do pedido   | Sim         | Data do pedido                           |
+| Número do pedido | Sim         | Deve corresponder ao Track Report        |
+| Total            | Sim         | Valor total do pedido                    |
+| Coluna AD        | Sim         | Custo total de envio                     |
+| Coluna E         | Não         | Quantidade de itens (para picking)       |
+| Coluna M         | Não         | CEP do destino                           |
+| Coluna O         | Não         | Estado/UF do destino                     |
+| Coluna T         | Não         | Custo do picking por unidade             |
+| Colunas de custo | Não         | Qualquer coluna com "custo" no nome      |
 
 ### Arquivo de Faturas
 
@@ -388,4 +454,78 @@ Sistema completo de gestão de faturamento e cobranças para logística, com int
 - [ ] Adicionar testes automatizados
 - [ ] Implementar cache mais agressivo
 - [ ] Adicionar paginação para listas grandes
+
+---
+
+## 📎 Notas de Remessa de Envio (XML NF-e)
+
+Sistema de anexação de notas fiscais de remessa de envio (brinde/doação) diretamente de arquivos XML de Nota Fiscal Eletrônica.
+
+### Funcionalidades
+
+- **Upload de XMLs**: Selecione múltiplos arquivos XML de NF-e
+- **Integração com Google Drive**: Selecione XMLs diretamente de uma pasta do Drive
+- **Extração automática**: O sistema extrai automaticamente:
+  - Chave NFe (44 dígitos)
+  - Data de emissão
+  - Valor total da NF (vNF) - valor simbólico, não usado no cálculo
+  - Nome do destinatário
+- **Visualização**: Tabela resumida das notas de remessa na fatura com link para download
+
+**Importante**: Os XMLs de notas de remessa são **apenas comprovantes de envio** com valores simbólicos. O DIFAL é cobrado separadamente conforme regras abaixo.
+
+---
+
+## 💰 Cobrança de DIFAL
+
+O sistema aplica a cobrança de DIFAL para **cada pedido** com as seguintes regras:
+
+### Cálculo do Preço
+
+- **Margem fixa**: 200% sobre o custo base do CSV
+- **Fórmula**: `preço = custo CSV × 3`
+- **Preço mínimo**: R$ 3,00 por pedido (se o cálculo resultar em valor menor)
+- **Quantidade**: 1 por pedido (não duplica mesmo que haja múltiplos envios do mesmo pedido)
+
+### Garantia de Cobrança
+
+- Se o pedido não tiver valor de DIFAL no CSV, o sistema **adiciona automaticamente** a cobrança mínima de R$ 3,00
+- Cada pedido é cobrado apenas uma vez, mesmo que apareça múltiplas vezes no relatório de rastreio
+
+### Exemplo de Cálculo
+
+| Custo CSV | Cálculo (×3) | Preço Final |
+|-----------|--------------|-------------|
+| R$ 0,50   | R$ 1,50      | R$ 3,00 (mínimo) |
+| R$ 1,00   | R$ 3,00      | R$ 3,00     |
+| R$ 2,00   | R$ 6,00      | R$ 6,00     |
+| N/A       | -            | R$ 3,00 (automático) |
+
+### Configuração do Google Drive Picker (Opcional)
+
+Para habilitar a integração com Google Drive, configure as variáveis de ambiente:
+
+```env
+VITE_GOOGLE_CLIENT_ID=seu-client-id.apps.googleusercontent.com
+VITE_GOOGLE_API_KEY=sua-api-key
+```
+
+**Passos para configurar:**
+
+1. Acesse https://console.cloud.google.com/
+2. Crie ou selecione um projeto
+3. Ative as APIs: **Google Drive API** e **Google Picker API**
+4. Vá em APIs & Services > Credentials
+5. Crie um **OAuth 2.0 Client ID** (tipo: Web application)
+   - Adicione `http://localhost:8001` em Authorized JavaScript origins
+   - Adicione seu domínio de produção também
+6. Crie uma **API Key**
+   - Restrinja para as APIs necessárias (Drive, Picker)
+7. Configure as variáveis no arquivo `.env.local`
+
+**Sem configuração do Google:** O sistema ainda funciona com upload manual de arquivos XML.
+
+
+
+
 

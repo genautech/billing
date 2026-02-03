@@ -61,7 +61,15 @@ interface ClientManagementViewProps {
 const ClientManagementView: React.FC<ClientManagementViewProps> = ({ clientes, onUpdate }) => {
     const [isFormOpen, setIsFormOpen] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [current, setCurrent] = useState<Omit<Cliente, 'id'>>({ nome: '', cnpj: '', email: '', emailFaturamento: '', role: 'client', skusAtivos: 0, unidadesEmEstoque: 0, logoUrl: '', password: '123' });
+    const [current, setCurrent] = useState<Omit<Cliente, 'id'>>({ 
+        nome: '', cnpj: '', email: '', emailFaturamento: '', role: 'client', 
+        skusAtivos: 0, unidadesEmEstoque: 0, 
+        posicoesLongarina: 0, posicoesPrateleira: 0, skusEntradaMaterial: 0,
+        posicoesPrateleiraM: 0, posicoesPrateleiraP: 0, posicoesPallet: 0,
+        posicoesCesto: 0, posicoesCaixaBin: 0, posicoesMiniCaixote: 0,
+        posicoesDamaged: 0, posicoesPickingStandard: 0, posicoesPortaPallet: 0,
+        logoUrl: '', password: '123' 
+    });
     const [currentId, setCurrentId] = useState<string | null>(null);
     const { addToast } = useToast();
 
@@ -71,7 +79,15 @@ const ClientManagementView: React.FC<ClientManagementViewProps> = ({ clientes, o
     const [isDeleting, setIsDeleting] = useState(false);
 
     const handleAddNew = () => {
-        setCurrent({ nome: '', cnpj: '', email: '', emailFaturamento: '', role: 'client', skusAtivos: 0, unidadesEmEstoque: 0, logoUrl: '', password: '123' });
+        setCurrent({ 
+            nome: '', cnpj: '', email: '', emailFaturamento: '', role: 'client', 
+            skusAtivos: 0, unidadesEmEstoque: 0, 
+            posicoesLongarina: 0, posicoesPrateleira: 0, skusEntradaMaterial: 0,
+            posicoesPrateleiraM: 0, posicoesPrateleiraP: 0, posicoesPallet: 0,
+            posicoesCesto: 0, posicoesCaixaBin: 0, posicoesMiniCaixote: 0,
+            posicoesDamaged: 0, posicoesPickingStandard: 0, posicoesPortaPallet: 0,
+            logoUrl: '', password: '123' 
+        });
         setCurrentId(null);
         setIsFormOpen(true);
     };
@@ -107,6 +123,11 @@ const ClientManagementView: React.FC<ClientManagementViewProps> = ({ clientes, o
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();
         setIsSubmitting(true);
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/a9ef296b-8240-4113-a518-0e1e56e2ff45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ClientManagementView.tsx:handleSubmit',message:'Iniciando salvamento do cliente',data:{currentId, current},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+        // #endregion
+
         try {
             const action = currentId ? 'atualizado' : 'adicionado';
             if (currentId) {
@@ -120,6 +141,10 @@ const ClientManagementView: React.FC<ClientManagementViewProps> = ({ clientes, o
         } catch (error) {
             console.error("Failed to save client:", error);
             addToast(`Erro ao salvar cliente: ${error instanceof Error ? error.message : String(error)}`, 'error');
+            
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/a9ef296b-8240-4113-a518-0e1e56e2ff45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ClientManagementView.tsx:handleSubmit',message:'Erro ao salvar cliente',data:{error: error instanceof Error ? error.message : String(error)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
+            // #endregion
         } finally {
             setIsSubmitting(false);
         }
@@ -187,6 +212,57 @@ const ClientManagementView: React.FC<ClientManagementViewProps> = ({ clientes, o
                                 <label className="block text-sm font-medium text-gray-700">Unidades em Estoque</label>
                                 <FormInput type="number" value={current.unidadesEmEstoque} onChange={(e) => setCurrent(p => ({...p, unidadesEmEstoque: parseInt(e.target.value) || 0 }))} required />
                             </div>
+                            <div className="md:col-span-2 pt-2 border-t border-gray-200 mt-2">
+                                <h5 className="text-sm font-semibold text-gray-600 uppercase tracking-wider">Armazenagem Fixa (Configuração Manual)</h5>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Posições Longarina</label>
+                                <FormInput type="number" value={current.posicoesLongarina || 0} onChange={(e) => setCurrent(p => ({...p, posicoesLongarina: parseInt(e.target.value) || 0 }))} />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Posições Prateleira</label>
+                                <FormInput type="number" value={current.posicoesPrateleira || 0} onChange={(e) => setCurrent(p => ({...p, posicoesPrateleira: parseInt(e.target.value) || 0 }))} />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Prateleira M</label>
+                                <FormInput type="number" value={current.posicoesPrateleiraM || 0} onChange={(e) => setCurrent(p => ({...p, posicoesPrateleiraM: parseInt(e.target.value) || 0 }))} />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Prateleira P</label>
+                                <FormInput type="number" value={current.posicoesPrateleiraP || 0} onChange={(e) => setCurrent(p => ({...p, posicoesPrateleiraP: parseInt(e.target.value) || 0 }))} />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Pallets</label>
+                                <FormInput type="number" value={current.posicoesPallet || 0} onChange={(e) => setCurrent(p => ({...p, posicoesPallet: parseInt(e.target.value) || 0 }))} />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Cestos</label>
+                                <FormInput type="number" value={current.posicoesCesto || 0} onChange={(e) => setCurrent(p => ({...p, posicoesCesto: parseInt(e.target.value) || 0 }))} />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Caixas Bin</label>
+                                <FormInput type="number" value={current.posicoesCaixaBin || 0} onChange={(e) => setCurrent(p => ({...p, posicoesCaixaBin: parseInt(e.target.value) || 0 }))} />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Mini Caixotes</label>
+                                <FormInput type="number" value={current.posicoesMiniCaixote || 0} onChange={(e) => setCurrent(p => ({...p, posicoesMiniCaixote: parseInt(e.target.value) || 0 }))} />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Damaged</label>
+                                <FormInput type="number" value={current.posicoesDamaged || 0} onChange={(e) => setCurrent(p => ({...p, posicoesDamaged: parseInt(e.target.value) || 0 }))} />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Picking Standard</label>
+                                <FormInput type="number" value={current.posicoesPickingStandard || 0} onChange={(e) => setCurrent(p => ({...p, posicoesPickingStandard: parseInt(e.target.value) || 0 }))} />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Porta Pallet</label>
+                                <FormInput type="number" value={current.posicoesPortaPallet || 0} onChange={(e) => setCurrent(p => ({...p, posicoesPortaPallet: parseInt(e.target.value) || 0 }))} />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">SKUs com Entrada de Material</label>
+                                <FormInput type="number" value={current.skusEntradaMaterial || 0} onChange={(e) => setCurrent(p => ({...p, skusEntradaMaterial: parseInt(e.target.value) || 0 }))} />
+                            </div>
                         </div>
                     </fieldset>
                     <div className="flex justify-end space-x-3 mt-4">
@@ -203,8 +279,8 @@ const ClientManagementView: React.FC<ClientManagementViewProps> = ({ clientes, o
                         <tr>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nome</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">SKUs</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unidades</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">SKUs/Estoque</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Longarina/Prateleira</th>
                             <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Ações</th>
                         </tr>
                     </thead>
@@ -213,8 +289,26 @@ const ClientManagementView: React.FC<ClientManagementViewProps> = ({ clientes, o
                             <tr key={c.id}>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{c.nome}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{c.email}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{c.skusAtivos}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{c.unidadesEmEstoque.toLocaleString('pt-BR')}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                    <div className="font-medium text-gray-900">{c.skusAtivos} SKUs</div>
+                                    <div className="text-xs text-gray-400">{c.unidadesEmEstoque.toLocaleString('pt-BR')} un.</div>
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                    <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                                        {c.posicoesLongarina ? <div className="text-xs font-medium text-blue-600">{c.posicoesLongarina} Long.</div> : null}
+                                        {c.posicoesPrateleira ? <div className="text-xs text-gray-400">{c.posicoesPrateleira} Prat.</div> : null}
+                                        {c.posicoesPrateleiraM ? <div className="text-xs text-gray-400">{c.posicoesPrateleiraM} Prat.M</div> : null}
+                                        {c.posicoesPrateleiraP ? <div className="text-xs text-gray-400">{c.posicoesPrateleiraP} Prat.P</div> : null}
+                                        {c.posicoesPallet ? <div className="text-xs text-gray-400">{c.posicoesPallet} Pall.</div> : null}
+                                        {c.posicoesPortaPallet ? <div className="text-xs text-gray-400">{c.posicoesPortaPallet} P.Pall</div> : null}
+                                        {c.posicoesCesto ? <div className="text-xs text-gray-400">{c.posicoesCesto} Cest.</div> : null}
+                                        {c.posicoesCaixaBin ? <div className="text-xs text-gray-400">{c.posicoesCaixaBin} Bin</div> : null}
+                                        {c.posicoesMiniCaixote ? <div className="text-xs text-gray-400">{c.posicoesMiniCaixote} Mini</div> : null}
+                                        {c.posicoesDamaged ? <div className="text-xs text-red-400">{c.posicoesDamaged} Dmg</div> : null}
+                                        {c.skusEntradaMaterial ? <div className="text-xs font-medium text-green-600">{c.skusEntradaMaterial} Entr.</div> : null}
+                                    </div>
+                                    {!c.posicoesLongarina && !c.posicoesPrateleira && !c.posicoesPallet && !c.posicoesCesto && <span className="text-xs text-gray-300">Nenhum fixo</span>}
+                                </td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-right space-x-2">
                                     <button onClick={() => handleEdit(c)} className="text-indigo-600 hover:text-indigo-900">Editar</button>
                                     <button onClick={() => handleDeleteClick(c)} className="text-red-600 hover:text-red-900">Excluir</button>

@@ -1,16 +1,29 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import type { CobrancaMensal } from '../types';
-import { filterCSVByMonth } from '../services/firestoreService';
+import type { CobrancaMensal, DetalheEnvio, TabelaPrecoItem } from '../types';
+import { filterCSVByMonth, isDigitalVoucherOrder, calculatePrecoVenda, isTemplateItem, getCostCategoryGroup } from '../services/firestoreService';
 
 interface ClientShipmentReportProps {
     clientCobrancas: CobrancaMensal[];
     selectedCobranca: CobrancaMensal | null;
     onCobrancaChange: (cobranca: CobrancaMensal | null) => void;
+    detalhesByCobrancaId?: Record<string, DetalheEnvio[]>;
+    tabelaPrecos?: TabelaPrecoItem[];
 }
 
 const formElementClasses = "mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition text-gray-900";
 
-const UNWANTED_COLUMNS = ['variantes', 'previsao de entrega', 'previsão de entrega', 'data de envio', 'datade envio', 'status'];
+// Columns to hide in the frontend display (not in CSV export)
+const UNWANTED_COLUMNS = [
+    'variantes', 'previsao de entrega', 'previsão de entrega', 'data de envio', 'datade envio', 'status',
+    // User requested columns to hide
+    'shipping', 'taxes', 'taxes included', 'discount used', 'free shipping', 'discount', 'discount code',
+    'store credit amount', 'total weight', 'payment type used', 'product id', 'item price', 
+    'item total discount', 'item total price', 'item requires shipping', 'item taxable', 'item taxbale',
+    'item vendor', 'category lvl1', 'category lvl2', 'category lvl3', 'category',
+    'billing company', 'billing name', 'billing address 1', 'billing address 2', 'billing city',
+    'billing zip', 'billing state', 'billing country', 'billing phone',
+    'shipping company', 'placed at', 'shipped at', 'cancelled at', 'cancelled by', 'notes'
+];
 const ITEMS_PER_PAGE = 20;
 
 const BarChart: React.FC<{ data: { label: string; value: number }[]; valueFormatter: (value: number) => string; }> = ({ data, valueFormatter }) => {
@@ -33,7 +46,7 @@ const BarChart: React.FC<{ data: { label: string; value: number }[]; valueFormat
     );
 };
 
-const ClientShipmentReport: React.FC<ClientShipmentReportProps> = ({ clientCobrancas, selectedCobranca, onCobrancaChange }) => {
+const ClientShipmentReport: React.FC<ClientShipmentReportProps> = ({ clientCobrancas, selectedCobranca, onCobrancaChange, detalhesByCobrancaId, tabelaPrecos }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
     
@@ -52,87 +65,136 @@ const ClientShipmentReport: React.FC<ClientShipmentReportProps> = ({ clientCobra
     };
 
     const reportData = useMemo(() => {
-        if (!selectedCobranca?.relatorioRastreioCSV) return { headers: [], rows: [] };
-    
-        // Filter CSV to show only shipments from the invoice month
-        let csvContent = filterCSVByMonth(selectedCobranca.relatorioRastreioCSV, selectedCobranca.mesReferencia);
-        csvContent = csvContent.startsWith('\ufeff') ? csvContent.substring(1) : csvContent;
-        const allLines = csvContent.trim().replace(/\r/g, '').split('\n');
-        if (allLines.length < 1) return { headers: [], rows: [] };
-    
-        let headerIndex = -1;
-        let headerLine = '';
-        let delimiter = ',';
-    
-        // Find the first line that looks like a header (has multiple columns)
-        for (let i = 0; i < allLines.length; i++) {
-            const line = allLines[i];
-            // Check for semicolon first as it's often a specific choice
-            if (line.split(';').length > 1) {
-                headerIndex = i;
-                headerLine = line;
-                delimiter = ';';
-                break;
+        // 1) Prefer CSV se disponível
+        if (selectedCobranca?.relatorioRastreioCSV) {
+            let csvContent = filterCSVByMonth(selectedCobranca.relatorioRastreioCSV, selectedCobranca.mesReferencia);
+            csvContent = csvContent.startsWith('\ufeff') ? csvContent.substring(1) : csvContent;
+            const allLines = csvContent.trim().replace(/\r/g, '').split('\n');
+            if (allLines.length < 1) return { headers: [], rows: [] };
+        
+            let headerIndex = -1;
+            let headerLine = '';
+            let delimiter = ',';
+        
+            for (let i = 0; i < allLines.length; i++) {
+                const line = allLines[i];
+                if (line.split(';').length > 1) {
+                    headerIndex = i;
+                    headerLine = line;
+                    delimiter = ';';
+                    break;
+                }
+                if (line.split(',').length > 1) {
+                    headerIndex = i;
+                    headerLine = line;
+                    delimiter = ',';
+                    break;
+                }
             }
-            // Fallback to comma
-            if (line.split(',').length > 1) {
-                headerIndex = i;
-                headerLine = line;
-                delimiter = ',';
-                break;
-            }
+        
+            if (headerIndex === -1) return { headers: [], rows: [] };
+        
+            const dataLines = allLines.slice(headerIndex + 1);
+            const regex = new RegExp(`${delimiter}(?=(?:(?:[^"]*"){2})*[^"]*$)`);
+        
+            const rawHeaders = headerLine.split(delimiter);
+            const keptColumnIndices: number[] = [];
+            const finalHeaders = rawHeaders.filter((header, index) => {
+                const normalizedHeader = header.trim().toLowerCase().replace(/"/g, '');
+                if (normalizedHeader && !UNWANTED_COLUMNS.includes(normalizedHeader)) {
+                    keptColumnIndices.push(index);
+                    return true;
+                }
+                return false;
+            }).map(h => h.trim().replace(/"/g, ''));
+        
+            const dateColumnIndex = rawHeaders.findIndex(h => h.trim().toLowerCase().replace(/"/g, '') === 'data');
+            
+            // Find item name column index for digital/voucher filtering
+            const itemNameColumnIndex = rawHeaders.findIndex(h => {
+                const normalized = h.trim().toLowerCase().replace(/"/g, '');
+                return normalized === 'item name' || normalized === 'nome do item' || 
+                       normalized === 'nome do produto' || normalized === 'product name' ||
+                       normalized === 'produto' || normalized === 'title' || normalized === 'título';
+            });
+        
+            const rows = dataLines.map(line => {
+                if (!line.trim()) return null;
+                const fullRow = line.split(regex);
+                while (fullRow.length < rawHeaders.length) {
+                    fullRow.push('');
+                }
+                
+                // Filter out digital/voucher rows using helper
+                if (itemNameColumnIndex !== -1) {
+                    const rowRecord: Record<string, string> = {};
+                    rawHeaders.forEach((h, idx) => {
+                        rowRecord[h.replace(/^"|"$/g, '')] = fullRow[idx]?.trim().replace(/^"|"$/g, '') || '';
+                    });
+                    if (isDigitalVoucherOrder(rowRecord)) return null;
+                }
+                
+                const filteredRow = keptColumnIndices.map(index => fullRow[index]?.trim().replace(/^"|"$/g, '') || '');
+        
+                const keptDateIndex = keptColumnIndices.indexOf(dateColumnIndex);
+                if (keptDateIndex !== -1 && filteredRow[keptDateIndex]) {
+                    try {
+                        let date;
+                        if (filteredRow[keptDateIndex].includes('/')) {
+                            const parts = filteredRow[keptDateIndex].split('/');
+                            date = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
+                        } else {
+                            date = new Date(filteredRow[keptDateIndex]);
+                        }
+                        if (!isNaN(date.getTime())) {
+                            filteredRow[keptDateIndex] = date.toLocaleDateString('pt-BR');
+                        }
+                    } catch (e) { /* Ignore parsing errors */ }
+                }
+                return filteredRow;
+            }).filter((row): row is string[] => row !== null && row.some(cell => cell.trim() !== ''));
+        
+            return { headers: finalHeaders, rows };
         }
-    
-        if (headerIndex === -1) {
-            // If no valid multi-column header is found, the file is considered invalid or empty for table display.
+
+        // 2) Fallback: usar detalhes da fatura (já persistidos) quando não há CSV
+        if (!selectedCobranca || !detalhesByCobrancaId || !tabelaPrecos) {
             return { headers: [], rows: [] };
         }
-    
-        const dataLines = allLines.slice(headerIndex + 1);
-        const regex = new RegExp(`${delimiter}(?=(?:(?:[^"]*"){2})*[^"]*$)`);
-    
-        const rawHeaders = headerLine.split(delimiter);
-        const keptColumnIndices: number[] = [];
-        const finalHeaders = rawHeaders.filter((header, index) => {
-            const normalizedHeader = header.trim().toLowerCase().replace(/"/g, '');
-            if (normalizedHeader && !UNWANTED_COLUMNS.includes(normalizedHeader)) {
-                keptColumnIndices.push(index);
-                return true;
-            }
-            return false;
-        }).map(h => h.trim().replace(/"/g, ''));
-    
-        const dateColumnIndex = rawHeaders.findIndex(h => h.trim().toLowerCase().replace(/"/g, '') === 'data');
-    
-        const rows = dataLines.map(line => {
-            if (!line.trim()) return null;
-            const fullRow = line.split(regex);
-            // Ensure the row has enough columns to avoid errors, padding with empty strings if necessary
-            while (fullRow.length < rawHeaders.length) {
-                fullRow.push('');
-            }
-            const filteredRow = keptColumnIndices.map(index => fullRow[index]?.trim().replace(/^"|"$/g, '') || '');
-    
-            const keptDateIndex = keptColumnIndices.indexOf(dateColumnIndex);
-            if (keptDateIndex !== -1 && filteredRow[keptDateIndex]) {
-                try {
-                    let date;
-                    if (filteredRow[keptDateIndex].includes('/')) {
-                        const parts = filteredRow[keptDateIndex].split('/');
-                        date = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
-                    } else {
-                        date = new Date(filteredRow[keptDateIndex]);
-                    }
-                    if (!isNaN(date.getTime())) {
-                        filteredRow[keptDateIndex] = date.toLocaleDateString('pt-BR');
-                    }
-                } catch (e) { /* Ignore parsing errors */ }
-            }
-            return filteredRow;
-        }).filter((row): row is string[] => row !== null && row.some(cell => cell.trim() !== ''));
-    
-        return { headers: finalHeaders, rows };
-    }, [selectedCobranca]);
+        const detalhes = detalhesByCobrancaId[selectedCobranca.id] || [];
+        if (detalhes.length === 0) return { headers: [], rows: [] };
+
+        const headers = ['Pedido', 'Rastreio', 'Estado', 'CEP', 'Serviço', 'Quantidade', 'Subtotal (R$)'];
+        const rows = detalhes.map(d => {
+            const item = tabelaPrecos.find(c => c.id === d.tabelaPrecoItemId);
+            // Use getCostCategoryGroup for consistent category matching
+            const isShippingItem = item ? getCostCategoryGroup(item.categoria) === 'envio' : false;
+            if (!item || !isShippingItem) return null;
+
+            const subtotal = (() => {
+                const isTemplate = isTemplateItem(item);
+                const isNonTemplateShipping = isShippingItem && !isTemplate;
+                if (isNonTemplateShipping) {
+                    // For non-template shipping: quantity = 1, price = value from CSV (stored in quantidade)
+                    // Apply price calculation with margin
+                    return calculatePrecoVenda(item, d.quantidade);
+                }
+                return calculatePrecoVenda(item) * d.quantidade;
+            })();
+
+            return [
+                d.codigoPedido || '-',
+                d.rastreio || '',
+                d.estado || '',
+                d.cep || '',
+                item ? `${item.subcategoria} - ${item.descricao}` : 'N/A',
+                d.quantidade.toString(),
+                subtotal.toFixed(2)
+            ];
+        }).filter((row): row is string[] => row !== null);
+
+        return { headers, rows };
+    }, [selectedCobranca, detalhesByCobrancaId, tabelaPrecos]);
 
     const filteredRows = useMemo(() => {
         setCurrentPage(1); // Reset page on search
@@ -206,40 +268,89 @@ const ClientShipmentReport: React.FC<ClientShipmentReportProps> = ({ clientCobra
 
     // Calculate shipments by state for the selected invoice
     const shipmentsByStateData = useMemo(() => {
-        if (!selectedCobranca?.relatorioRastreioCSV) return [];
+        // CSV path
+        if (selectedCobranca?.relatorioRastreioCSV) {
+            const filteredCSV = filterCSVByMonth(selectedCobranca.relatorioRastreioCSV, selectedCobranca.mesReferencia);
+            
+            const regionCounts: Record<string, number> = {};
+            const parsed = robustCSVParser(filteredCSV);
+            if (!parsed) return [];
+            
+            const { headers, dataLines, delimiter } = parsed;
+            const possibleUfHeaders = ['uf', 'estado', 'tipo de envio'];
+            const ufHeaderFound = possibleUfHeaders.find(h => headers.includes(h));
+            const ufColumnIndex = ufHeaderFound ? headers.indexOf(ufHeaderFound) : -1;
         
-        // Filter CSV to show only shipments from the invoice month
-        const filteredCSV = filterCSVByMonth(selectedCobranca.relatorioRastreioCSV, selectedCobranca.mesReferencia);
-        
-        const regionCounts: Record<string, number> = {};
-        const parsed = robustCSVParser(filteredCSV);
-        if (!parsed) return [];
-        
-        const { headers, dataLines, delimiter } = parsed;
-        
-        // Search for multiple possible state/UF column headers
-        const possibleUfHeaders = ['uf', 'estado', 'tipo de envio'];
-        const ufHeaderFound = possibleUfHeaders.find(h => headers.includes(h));
-        const ufColumnIndex = ufHeaderFound ? headers.indexOf(ufHeaderFound) : -1;
-       
-        if (ufColumnIndex === -1) return [];
+            if (ufColumnIndex === -1) return [];
+            
+            // Find columns for digital/voucher filtering
+            const itemNameColumnIndex = headers.findIndex(h => 
+                h === 'item name' || h === 'nome do item' || h === 'nome do produto' || 
+                h === 'product name' || h === 'produto' || h === 'title' || h === 'título'
+            );
+            const skuColumnIndex = headers.findIndex(h =>
+                h === 'sku' || h === 'product sku' || h === 'product_sku' || h === 'sku do produto' || h === 'sku produto'
+            );
+            const shippingModeColumnIndex = headers.findIndex(h =>
+                h === 'shipping mode' || h === 'shipping method' || h === 'mode' || h === 'modo de envio' || h === 'modalidade de envio' || h === 'service level' || h === 'service'
+            );
 
-        const regex = new RegExp(`${delimiter}(?=(?:(?:[^"]*"){2})*[^"]*$)`);
-        dataLines.forEach(line => {
-            const row = line.split(regex);
-            const region = row[ufColumnIndex]?.trim().toUpperCase().replace(/"/g, '');
-            if (region) {
-                regionCounts[region] = (regionCounts[region] || 0) + 1;
+            const regex = new RegExp(`${delimiter}(?=(?:(?:[^"]*"){2})*[^"]*$)`);
+            dataLines.forEach(line => {
+                const row = line.split(regex);
+                
+                // Skip digital/voucher rows
+                const rowRecord: Record<string, string> = {};
+                if (itemNameColumnIndex !== -1) rowRecord['Item name'] = row[itemNameColumnIndex]?.trim().replace(/"/g, '') || '';
+                if (skuColumnIndex !== -1) rowRecord['SKU'] = row[skuColumnIndex]?.trim().replace(/"/g, '') || '';
+                if (shippingModeColumnIndex !== -1) rowRecord['Shipping mode'] = row[shippingModeColumnIndex]?.trim().replace(/"/g, '') || '';
+                if (Object.keys(rowRecord).length > 0 && isDigitalVoucherOrder(rowRecord)) {
+                    return; // Skip this row
+                }
+                
+                const region = row[ufColumnIndex]?.trim().toUpperCase().replace(/"/g, '');
+                if (region) {
+                    regionCounts[region] = (regionCounts[region] || 0) + 1;
+                }
+            });
+
+            if (Object.keys(regionCounts).length === 0) return [];
+            
+            return Object.entries(regionCounts)
+                .map(([label, value]) => ({ label, value }))
+                .sort((a, b) => b.value - a.value);
+        }
+
+        // Fallback: use detalhes persisted in the invoice
+        if (!selectedCobranca || !detalhesByCobrancaId || !tabelaPrecos) return [];
+        const detalhes = detalhesByCobrancaId[selectedCobranca.id] || [];
+        if (detalhes.length === 0) return [];
+
+        const regionCounts: Record<string, number> = {};
+        detalhes.forEach(d => {
+            if (!d.estado || !d.tabelaPrecoItemId) return;
+            const item = tabelaPrecos.find(c => c.id === d.tabelaPrecoItemId);
+            if (!item) return;
+            const isShippingItem = item.categoria === 'Envios' || item.categoria === 'Retornos';
+            if (!isShippingItem) return;
+
+            let estado = d.estado.toUpperCase().trim();
+            const estadoMatch = estado.match(/\b([A-Z]{2})\b/);
+            if (estadoMatch) {
+                estado = estadoMatch[1];
+            } else if (estado.length > 2) {
+                estado = estado.substring(0, 2);
             }
+
+            regionCounts[estado] = (regionCounts[estado] || 0) + 1;
         });
 
         if (Object.keys(regionCounts).length === 0) return [];
-        
+
         return Object.entries(regionCounts)
             .map(([label, value]) => ({ label, value }))
             .sort((a, b) => b.value - a.value);
-
-    }, [selectedCobranca]);
+    }, [selectedCobranca, detalhesByCobrancaId, tabelaPrecos]);
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-md animate-fade-in space-y-6">
@@ -281,6 +392,32 @@ const ClientShipmentReport: React.FC<ClientShipmentReportProps> = ({ clientCobra
                     </button>
                 </div>
             </div>
+
+            {/* Summary of shipments */}
+            {selectedCobranca && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    <div>
+                        <p className="text-xs text-gray-500 uppercase font-medium">Total de Envios</p>
+                        <p className="text-xl font-bold text-blue-700">
+                            {selectedCobranca.quantidadeEnvios !== undefined ? selectedCobranca.quantidadeEnvios : reportData.rows.length}
+                        </p>
+                    </div>
+                    <div>
+                        <p className="text-xs text-gray-500 uppercase font-medium">Valor Total Envios</p>
+                        <p className="text-xl font-bold text-gray-800">
+                            {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(selectedCobranca.totalEnvio)}
+                        </p>
+                    </div>
+                    <div>
+                        <p className="text-xs text-gray-500 uppercase font-medium">Período</p>
+                        <p className="text-lg font-semibold text-gray-700">{selectedCobranca.mesReferencia}</p>
+                    </div>
+                    <div>
+                        <p className="text-xs text-gray-500 uppercase font-medium">Estados Atendidos</p>
+                        <p className="text-xl font-bold text-green-700">{shipmentsByStateData.length}</p>
+                    </div>
+                </div>
+            )}
 
             {reportData.rows.length > 0 ? (
                 <>

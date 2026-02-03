@@ -4,7 +4,7 @@ import { useToast } from '../../../contexts/ToastContext';
 import { FormInput, FormSelect } from '../../ui/FormControls';
 import PriceTableUpload from './PriceTableUpload';
 import PriceItemModal from './PriceItemModal';
-import { addTabelaPrecoItem, updateTabelaPrecoItem, deleteTabelaPrecoItem, batchUpdatePriceMargins } from '../../../services/firestoreService';
+import { addTabelaPrecoItem, updateTabelaPrecoItem, deleteTabelaPrecoItem, batchUpdatePriceMargins, updateTPItemsMargin } from '../../../services/firestoreService';
 
 // --- Local Confirmation Modal Component ---
 const ConfirmDeleteModal: React.FC<{
@@ -183,6 +183,110 @@ const BulkMarginUpdater: React.FC<{ tabelaPrecos: TabelaPrecoItem[], onUpdate: (
     );
 };
 
+// Component for updating TP (Template/Variable Cost) items margin
+const TPItemsMarginUpdater: React.FC<{ onUpdate: () => void }> = ({ onUpdate }) => {
+    const [tpMargin, setTpMargin] = useState('300');
+    const [isUpdating, setIsUpdating] = useState(false);
+    const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+    const { addToast } = useToast();
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        const marginValue = parseFloat(tpMargin.replace(',', '.'));
+        if (isNaN(marginValue) || marginValue < 0) {
+            addToast('Por favor, insira um valor de margem válido.', 'error');
+            return;
+        }
+        setIsConfirmOpen(true);
+    };
+
+    const handleConfirmUpdate = async () => {
+        const marginValue = parseFloat(tpMargin.replace(',', '.'));
+        if (isNaN(marginValue) || marginValue < 0) return;
+
+        setIsUpdating(true);
+        try {
+            const result = await updateTPItemsMargin(marginValue);
+            addToast(`${result.updated} itens (TP) atualizados com margem de ${marginValue}%. ${result.errors > 0 ? `(${result.errors} erros)` : ''}`, result.errors > 0 ? 'warning' : 'success');
+            onUpdate();
+        } catch (error) {
+            console.error("Failed to update TP items margins:", error);
+            addToast(`Erro ao atualizar: ${error instanceof Error ? error.message : String(error)}`, 'error');
+        } finally {
+            setIsUpdating(false);
+            setIsConfirmOpen(false);
+        }
+    };
+
+    return (
+        <>
+            <div className="bg-gradient-to-r from-purple-50 to-indigo-50 p-6 rounded-lg shadow-md border border-purple-200">
+                <h4 className="text-lg font-semibold text-purple-800">Margem para Custos Variáveis (TP)</h4>
+                <p className="text-sm text-purple-600 mt-1">
+                    Aplique uma margem de lucro para todos os itens de custo variável (Frete, Difal, Seguro, etc.) marcados com "(TP)".
+                    Esses itens usam o custo do arquivo CSV + sua margem configurada aqui.
+                </p>
+                <form onSubmit={handleSubmit} className="mt-4 flex flex-col sm:flex-row gap-4 items-end">
+                    <div className="flex-grow w-full">
+                        <label className="block text-sm font-medium text-purple-700">Margem de Lucro (%)</label>
+                        <FormInput 
+                            type="text" 
+                            value={tpMargin} 
+                            onChange={e => setTpMargin(e.target.value)} 
+                            required 
+                            placeholder="Ex: 300" 
+                        />
+                    </div>
+                    <div className="flex-shrink-0 w-full sm:w-auto">
+                        <button 
+                            type="submit" 
+                            disabled={isUpdating} 
+                            className="w-full bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 shadow-sm font-medium transition-colors disabled:bg-gray-400"
+                        >
+                            {isUpdating ? 'Atualizando...' : 'Aplicar aos Itens (TP)'}
+                        </button>
+                    </div>
+                </form>
+            </div>
+            {isConfirmOpen && (
+                <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50 animate-fade-in" onClick={() => setIsConfirmOpen(false)}>
+                    <div className="bg-white rounded-lg shadow-xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+                        <div className="p-6 text-center">
+                            <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-purple-100">
+                                <svg className="h-6 w-6 text-purple-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                            </div>
+                            <h3 className="text-lg mt-3 font-medium text-gray-900">Confirmar Atualização (TP)</h3>
+                            <p className="mt-2 text-sm text-gray-500">
+                                Aplicar margem de <strong>{tpMargin}%</strong> para TODOS os itens com "(TP)" na descrição (Frete, Difal, Seguro, etc.)?
+                            </p>
+                        </div>
+                        <div className="bg-gray-50 px-4 py-3 sm:px-6 flex flex-row-reverse rounded-b-lg">
+                            <button
+                                type="button"
+                                onClick={handleConfirmUpdate}
+                                disabled={isUpdating}
+                                className="w-full sm:w-auto inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-purple-600 text-base font-medium text-white hover:bg-purple-700 sm:ml-3 disabled:bg-purple-300"
+                            >
+                                {isUpdating ? 'Atualizando...' : 'Confirmar'}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setIsConfirmOpen(false)}
+                                disabled={isUpdating}
+                                className="w-full sm:w-auto mt-3 sm:mt-0 inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                            >
+                                Cancelar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </>
+    );
+};
+
 
 interface SettingsViewProps {
     tabelaPrecos: TabelaPrecoItem[];
@@ -279,6 +383,8 @@ const SettingsView: React.FC<SettingsViewProps> = ({ tabelaPrecos, onUpdate }) =
             </div>
 
             <BulkMarginUpdater tabelaPrecos={tabelaPrecos} onUpdate={onUpdate} />
+
+            <TPItemsMarginUpdater onUpdate={onUpdate} />
 
             <PriceTableUpload onUpdate={onUpdate} />
 

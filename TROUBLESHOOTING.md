@@ -7,13 +7,15 @@ Este documento contém soluções para problemas comuns encontrados durante o de
 ### Erro: "Service account does not exist"
 
 **Sintoma:**
-```
+
+```bash
 ERROR: Service account 510465863297@cloudbuild.gserviceaccount.com does not exist.
 ```
 
 **Causa:** A service account do Cloud Build ainda não foi criada.
 
 **Solução:**
+
 ```bash
 # Habilitar Cloud Build API (cria a service account automaticamente)
 gcloud services enable cloudbuild.googleapis.com --project=YOUR_PROJECT_ID
@@ -27,7 +29,8 @@ gcloud services enable cloudbuild.googleapis.com --project=YOUR_PROJECT_ID
 ### Erro: "Permission denied on secret"
 
 **Sintoma:**
-```
+
+```bash
 ERROR: Permission denied on secret: projects/.../secrets/gemini-api-key/versions/latest 
 for Revision service account ...-compute@developer.gserviceaccount.com
 ```
@@ -35,6 +38,7 @@ for Revision service account ...-compute@developer.gserviceaccount.com
 **Causa:** A service account do Cloud Run não tem permissão para acessar o secret.
 
 **Solução:**
+
 ```bash
 PROJECT_NUMBER=$(gcloud projects describe YOUR_PROJECT_ID --format="value(projectNumber)")
 
@@ -56,7 +60,8 @@ gcloud secrets add-iam-policy-binding gemini-api-key \
 ### Erro: "Container failed to start and listen on PORT"
 
 **Sintoma:**
-```
+
+```bash
 ERROR: The user-provided container failed to start and listen on the port defined 
 provided by the PORT=8080 environment variable within the allocated timeout.
 ```
@@ -64,6 +69,7 @@ provided by the PORT=8080 environment variable within the allocated timeout.
 **Causa:** O Nginx está configurado para escutar na porta 80, mas o Cloud Run espera a porta definida pela variável `PORT` (geralmente 8080).
 
 **Solução:**
+
 O problema foi resolvido criando um script `entrypoint.sh` que configura o Nginx dinamicamente:
 
 ```bash
@@ -76,6 +82,7 @@ exec nginx -g "daemon off;"
 E atualizando o `Dockerfile` para usar este script como entrypoint.
 
 **Verificar:** Certifique-se de que o `Dockerfile` inclui:
+
 - Cópia do `entrypoint.sh`
 - `ENTRYPOINT ["/entrypoint.sh"]`
 - `EXPOSE 8080`
@@ -107,7 +114,8 @@ gcloud run services add-iam-policy-binding billing-app \
 ### Erro: "Image not found"
 
 **Sintoma:**
-```
+
+```bash
 ERROR: Image gcr.io/.../billing-app:... not found
 ```
 
@@ -138,7 +146,8 @@ ERROR: Image gcr.io/.../billing-app:... not found
 ### Erro: "npm ci failed"
 
 **Sintoma:**
-```
+
+```bash
 ERROR: npm ci --only=production=false failed
 ```
 
@@ -159,7 +168,8 @@ ERROR: npm ci --only=production=false failed
 ### Erro: "Build timeout"
 
 **Sintoma:**
-```
+
+```bash
 ERROR: Build timeout after 1200s
 ```
 
@@ -187,6 +197,11 @@ ERROR: Build timeout after 1200s
 ### Erro: "Firebase config is not set!"
 
 **Sintoma:**
+
+```text
+Firebase config is not set!
+```
+
 Console mostra aviso sobre configuração do Firebase.
 
 **Causa:** As credenciais do Firebase não estão configuradas corretamente.
@@ -250,7 +265,8 @@ Erro ao acessar dados do Firestore.
 ### Erro: "The query requires an index"
 
 **Sintoma:**
-```
+
+```text
 ERROR: The query requires an index
 ```
 
@@ -260,6 +276,105 @@ ERROR: The query requires an index
 1. O Firestore mostrará um link no console do navegador
 2. Clique no link para criar o índice automaticamente
 3. Ou crie manualmente em [Firestore Indexes](https://console.firebase.google.com/project/_/firestore/indexes)
+
+---
+
+## Problemas de Geração de Faturas
+
+### Fatura com valor total zerado
+
+**Sintoma:**
+Fatura é gerada mas valorTotal é 0, mesmo havendo detalhes de envio.
+
+**Causa:**
+- Tabela de preços sem itens correspondentes
+- Colunas do CSV sem match na tabela de preços
+- Item de preço com precoVenda = 0
+
+**Solução:**
+1. Verifique o console do navegador para os logs de processamento
+2. Procure por mensagens como:
+   - `ERRO: Preço calculado é 0 para item ID...`
+   - `⚠️ Match NÃO encontrado para coluna...`
+   - `ERRO CRÍTICO: Fatura tem valor total zerado mas há detalhes!`
+3. Verifique se a tabela de preços contém os itens necessários
+4. Confirme que os itens têm `custoUnitario` e `margemLucro` válidos
+
+---
+
+### Nenhum pedido encontrado após processamento
+
+**Sintoma:**
+Ao processar os CSVs, nenhum pedido é encontrado ou todos aparecem como "não correspondentes".
+
+**Causa:**
+- Coluna de ID de pedido não identificada
+- IDs de pedido não coincidem entre Track Report e Order Detail
+- Dados filtrados pelo mês de referência incorreto
+
+**Solução:**
+1. Verifique se o Track Report tem uma coluna chamada "Número do pedido", "Numero", ou similar
+2. Verifique se o Order Detail tem a mesma coluna com valores correspondentes
+3. Confirme que o mês de referência selecionado corresponde às datas nos CSVs
+4. Verifique os logs do console:
+   - `Track Report filtrado: X linhas`
+   - `Order Detail filtrado: Y linhas`
+   - `Pedidos com match: Z`
+
+---
+
+### Colunas de custo sem correspondência
+
+**Sintoma:**
+Aviso de que algumas colunas de custo não tiveram match na tabela de preços.
+
+**Causa:**
+- Nomes das colunas no CSV não correspondem às descrições na tabela de preços
+- Falta item específico na tabela de preços
+
+**Solução:**
+1. Verifique os logs para identificar quais colunas não tiveram match
+2. Adicione ou edite itens na tabela de preços com descrições correspondentes
+3. Use as mesmas palavras-chave presentes nas colunas do CSV
+
+---
+
+### Item de picking não encontrado
+
+**Sintoma:**
+Aviso: `Item de picking "pedidos contendo de 0.0 até 1.0 itens" NÃO encontrado`
+
+**Causa:**
+Tabela de preços não contém os itens de picking/packing necessários.
+
+**Solução:**
+1. Adicione à tabela de preços um item com descrição contendo:
+   - "pedidos contendo de 0.0 até 1.0 itens"
+   - "pedidos contendo mais de 1.0 itens"
+2. Configure custoUnitario e margemLucro adequados
+
+---
+
+### Formato esperado dos CSVs
+
+**Track Report (Relatório de Rastreio):**
+- Colunas obrigatórias:
+  - Data de envio (ou "Data de Envio", "Data")
+  - Número do pedido (ou "Numero", "Order ID")
+  - Rastreio (opcional, mas recomendado)
+
+**Order Detail (Relatório de Custos):**
+- Colunas obrigatórias:
+  - Data do pedido (ou "Data")
+  - Número do pedido (correspondente ao Track Report)
+  - Total
+- Colunas de custo identificadas automaticamente (qualquer coluna com "custo" no nome)
+- Colunas especiais:
+  - Coluna AD: Custo total de envio
+  - Coluna E: Quantidade de itens (para cálculo de picking)
+  - Coluna M: CEP do destino
+  - Coluna O: Estado/UF do destino
+  - Coluna T: Custo do picking de produtos
 
 ---
 
@@ -370,6 +485,96 @@ gcloud builds log BUILD_ID --project=YOUR_PROJECT_ID
 
 ---
 
+## Problemas com DIFAL
+
+### DIFAL cobrado múltiplas vezes por pedido
+
+**Sintoma:** O mesmo pedido aparece com várias cobranças de DIFAL.
+
+**Causa:** O pedido aparece múltiplas vezes no relatório de rastreio (ex: múltiplos envios).
+
+**Solução:** A partir da versão atual, o sistema controla automaticamente duplicações. Cada pedido é cobrado apenas uma vez por DIFAL, independente de quantas vezes apareça no relatório.
+
+### DIFAL não aparece em alguns pedidos
+
+**Sintoma:** Alguns pedidos não têm cobrança de DIFAL mesmo tendo envio.
+
+**Causa:** O CSV não continha coluna de DIFAL ou o valor estava zerado.
+
+**Solução:** O sistema agora adiciona automaticamente DIFAL de R$ 3,00 (mínimo) para pedidos que não tenham valor de DIFAL no CSV.
+
+### Valor do DIFAL incorreto
+
+**Sintoma:** O valor cobrado não corresponde ao esperado.
+
+**Causa:** Confusão entre margem configurada na tabela de preços e margem fixa do DIFAL.
+
+**Solução:** O DIFAL usa **margem fixa de 200%** (custo × 3) com **mínimo de R$ 3,00**. A margem da tabela de preços não é utilizada para DIFAL.
+
+**Cálculo:**
+- Custo CSV R$ 0,50 → R$ 3,00 (mínimo aplicado)
+- Custo CSV R$ 1,00 → R$ 3,00 (1 × 3 = 3)
+- Custo CSV R$ 2,00 → R$ 6,00 (2 × 3 = 6)
+
+### XMLs de notas fiscais não alteram valor do DIFAL
+
+**Sintoma:** Após anexar XMLs, o valor do DIFAL não mudou.
+
+**Causa:** Isso é o comportamento esperado.
+
+**Solução:** Os XMLs de notas de remessa são **apenas comprovantes de envio** para download. Os valores contidos neles são simbólicos (brinde) e não afetam a cobrança de DIFAL.
+
+### DIFAL não aparece na fatura do cliente
+
+**Sintoma:** O DIFAL foi cobrado na geração mas não aparece para o cliente.
+
+**Causa:** Os IDs dos itens de preço da fatura não correspondem aos IDs da tabela de preços atual.
+
+**Solução:** Este problema ocorre quando a fatura foi gerada com uma versão antiga da tabela de preços. O sistema agora:
+1. Utiliza um mecanismo de fallback por descrição quando o ID não é encontrado
+2. Identifica automaticamente itens DIFAL por palavras-chave na descrição
+3. Exibe itens DIFAL mesmo que estejam categorizados como "Custos Internos"
+
+**Prevenção:** Use sempre a tabela de preços do cliente (se existir) ou a global atualizada. O sistema mostra no **resumo pré-aprovação** qual tabela está sendo utilizada.
+
+### IDs de DIFAL não correspondem à tabela de preços
+
+**Sintoma:** Mensagem "Item não encontrado na tabela para ID" nos logs.
+
+**Causa:** A tabela de preços foi atualizada após a geração da fatura, alterando os IDs.
+
+**Solução:** 
+1. O sistema usa fallback por descrição para encontrar itens DIFAL
+2. Verifique no **resumo pré-aprovação** se a tabela correta está sendo utilizada
+3. Se persistir, considere regenerar a fatura com a tabela atualizada
+
+---
+
+## Resumo Pré-Aprovação
+
+### O que é o Resumo Pré-Aprovação?
+
+Antes de salvar uma fatura, o sistema exibe um resumo detalhado com:
+- **Total de pedidos únicos** processados
+- **Total de envios** (valor monetário)
+- **Total de DIFAL** com quantidade de cobranças
+- **Total de armazenagem**
+- **Outros custos logísticos**
+- **Total geral da fatura**
+- **Qual tabela de preços está sendo usada** (Cliente ou Global)
+- **Avisos** sobre itens não encontrados
+- **Pedidos sem correspondência**
+
+### Tabela "Cliente" vs "Global"
+
+O resumo indica qual tabela está sendo utilizada:
+- **Cliente**: Tabela personalizada do cliente com margens específicas
+- **Global**: Tabela padrão compartilhada por todos os clientes
+
+**Importante:** Se o cliente tem uma tabela personalizada configurada, ela será utilizada automaticamente. Isso garante que as margens específicas do cliente sejam aplicadas.
+
+---
+
 ## Checklist de Verificação
 
 Antes de reportar um problema, verifique:
@@ -396,4 +601,8 @@ Se o problema persistir:
    - Logs relevantes
    - Passos para reproduzir
    - Versão do código (commit hash)
+
+
+
+
 

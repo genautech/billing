@@ -100,6 +100,12 @@ export const generateDIFALExplanation = async (): Promise<string> => {
         3. Quando é aplicado (origem e destino)
         4. Como a Yoobe processa e cobra o DIFAL de forma transparente
         5. Como aparece nas notas fiscais de envio
+        6. **IMPORTANTE - Pagamento Automático**: 
+           - O valor do DIFAL é automaticamente cobrado e pago pela Yoobe
+           - Utiliza um gateway de pagamento integrado para realizar o pagamento
+           - O sistema cobra uma taxa fixa que é depois cobrada na fatura mensal, de acordo com a tabela de preços
+           - Não é necessário nenhuma ação pela empresa cliente - tudo é processado automaticamente
+           - O reembolso do DIFAL pago aparece na fatura mensal de serviços
         
         O texto deve ser técnico mas acessível, adequado para departamentos de compras e contabilidade.
         Use no máximo 600 palavras.
@@ -133,6 +139,12 @@ export const generateDIFALExplanation = async (): Promise<string> => {
 - Calculamos o DIFAL automaticamente para cada envio baseado na origem (nossa localização) e destino (CEP do cliente final)
 - O valor é incluído na nota fiscal de envio de forma transparente
 - A cobrança aparece separadamente na fatura mensal, permitindo rastreabilidade completa
+
+**Pagamento Automático**: 
+- O valor do DIFAL é **automaticamente cobrado e pago pela Yoobe** utilizando um **gateway de pagamento integrado**
+- O sistema cobra uma **taxa fixa** que é depois cobrada na fatura mensal, de acordo com a tabela de preços
+- **Não é necessário nenhuma ação pela empresa cliente** - todo o processo é automatizado
+- O reembolso do DIFAL pago aparece na fatura mensal de serviços
 
 **Transparência**: Todos os envios incluem a nota fiscal com o DIFAL calculado, e na sua fatura mensal você pode ver exatamente quanto foi cobrado de DIFAL em cada pedido, facilitando a conciliação contábil.`;
     }
@@ -391,21 +403,36 @@ export const generateCicloNotaFiscalExplanation = async (): Promise<string> => {
            - Serviços de logística são cobrados mensalmente
            - Produtos são armazenados e depois enviados
         
-        2. **Nota de Venda para Entrega Futura**:
-           - Quando um produto é armazenado, geramos uma nota fiscal de "venda para entrega futura"
-           - Esta nota é emitida no momento do armazenamento
+        2. **Diferentes Situações de Emissão de Notas Fiscais**:
+           
+           **Situação A - Entrada no Estoque**:
+           - Quando um produto é comprado e entra no estoque da Yoobe, é emitida uma "Nota Fiscal de Venda para Entrega Futura"
+           - Esta nota é emitida no momento da compra/entrada do estoque
+           
+           **Situação B - Venda com Pagamento**:
+           - Quando existe uma venda real do produto ao cliente com pagamento, é emitida uma "Nota Fiscal de Venda" (simples)
+           - Esta nota fiscal é enviada diretamente para o cliente
+           
+           **Situação C - Venda com Pontos**:
+           - Quando o cliente não paga o pedido (venda com pontos), é emitida uma "Nota Fiscal de Doação"
+           - Esta nota caracteriza a operação como doação/brinde
         
-        3. **Nota de Brinde para Cliente Final**:
-           - Após a emissão da nota de venda futura, quando o produto é enviado ao cliente final
-           - Geramos uma nota fiscal de brinde para o cliente final que receberá o produto
-           - Esta nota fecha o ciclo da nota fiscal original
-        
-        4. **Armazenamento na Logística**:
+        3. **Armazenamento na Logística**:
            - O produto fica armazenado na logística da Yoobe até o envio
+           - O restante do fluxo (armazenamento, envio, 3 notas no momento do envio) é o mesmo para todas as situações
+        
+        4. **No Momento do Envio - 3 Notas Fiscais Emitidas**:
+           - Independente da situação inicial, no momento do envio são emitidas simultaneamente:
+             a) Nota Fiscal de Doação (NF-e) - CFOP 6949 - para o cliente final
+             b) Nota Fiscal de Retorno Simbólico (NF-e) - CFOP 1949 - para a logística
+             c) GNRE - para pagamento do DIFAL
         
         5. **Pagamento do DIFAL**:
            - O DIFAL é pago no momento do envio do produto
-           - É calculado e pago pela Yoobe
+           - É calculado e pago automaticamente pela Yoobe
+           - Utiliza um gateway de pagamento integrado para realizar o pagamento
+           - O sistema cobra uma taxa fixa que é depois cobrada na fatura mensal, de acordo com a tabela de preços
+           - Não é necessário nenhuma ação pela empresa cliente - tudo é processado automaticamente
         
         6. **Reembolso do DIFAL**:
            - O reembolso do DIFAL é realizado juntamente com a nota fiscal mensal dos serviços de logística e entregas
@@ -414,9 +441,9 @@ export const generateCicloNotaFiscalExplanation = async (): Promise<string> => {
         O texto deve ser:
         - Técnico mas acessível para o departamento financeiro
         - Visualmente organizado com seções claras
-        - Explicar o fluxo completo do processo
-        - Destacar os momentos importantes (armazenamento, envio, reembolso)
-        - Máximo de 600 palavras
+        - Explicar o fluxo completo do processo considerando as três situações
+        - Destacar os momentos importantes (entrada, armazenamento, envio, reembolso)
+        - Máximo de 700 palavras
         
         **IMPORTANTE - Formato do Conteúdo:**
         - NÃO inclua assinaturas, saudações finais
@@ -447,25 +474,199 @@ A Yoobe trabalha com dois tipos principais de cobrança:
 
 **Produtos**: Produtos são armazenados e depois enviados, gerando um ciclo específico de notas fiscais.
 
-## 2. Nota de Venda para Entrega Futura
+## 2. Diferentes Situações de Emissão de Notas Fiscais
 
-Quando um produto é armazenado na logística da Yoobe, geramos uma nota fiscal de "venda para entrega futura". Esta nota é emitida no momento do armazenamento e representa a venda do produto que será entregue posteriormente.
+O ciclo de notas fiscais varia conforme a situação inicial do produto:
 
-## 3. Nota de Brinde para Cliente Final
+### Situação A - Entrada no Estoque
 
-Após a emissão da nota de venda futura, quando o produto é enviado ao cliente final, geramos uma nota fiscal de brinde para o cliente final que receberá o produto. Esta nota fecha o ciclo da nota fiscal original de venda futura.
+Quando um produto é comprado e entra no estoque da Yoobe, é emitida uma **Nota Fiscal de Venda para Entrega Futura** no momento da compra/entrada do estoque. Esta nota representa a venda do produto que será entregue posteriormente.
 
-## 4. Armazenamento na Logística
+### Situação B - Venda com Pagamento
 
-O produto permanece armazenado na logística da Yoobe até o momento do envio, quando então é processado e enviado ao cliente final.
+Quando existe uma venda real do produto ao cliente com pagamento, é emitida uma **Nota Fiscal de Venda** (simples). Esta nota fiscal é enviada diretamente para o cliente que realizou a compra.
+
+### Situação C - Venda com Pontos
+
+Quando o cliente não paga o pedido (venda com pontos), é emitida uma **Nota Fiscal de Doação**. Esta nota caracteriza a operação como doação ou brinde, conforme a legislação tributária.
+
+## 3. Armazenamento na Logística
+
+Independente da situação inicial, o produto permanece armazenado na logística da Yoobe até o momento do envio. O restante do fluxo (armazenamento, envio, 3 notas no momento do envio) é o mesmo para todas as situações.
+
+## 4. No Momento do Envio - 3 Notas Fiscais Emitidas
+
+No momento do envio do produto ao cliente final, são emitidas simultaneamente três notas fiscais, independente da situação inicial:
+
+1. **Nota Fiscal de Doação (NF-e)** - CFOP 6949: Emitida para o cliente final que receberá o produto
+2. **Nota Fiscal de Retorno Simbólico (NF-e)** - CFOP 1949: Emitida para a logística, fechando o ciclo contábil
+3. **GNRE**: Documento para pagamento do DIFAL ao estado de destino
 
 ## 5. Pagamento do DIFAL
 
-O DIFAL (Diferencial de Alíquota do ICMS) é calculado e pago pela Yoobe no momento do envio do produto. Este imposto é calculado com base na origem e destino do envio.
+O DIFAL (Diferencial de Alíquota do ICMS) é calculado e pago automaticamente pela Yoobe no momento do envio do produto. Este imposto é calculado com base na origem e destino do envio. A Yoobe utiliza um gateway de pagamento integrado para realizar o pagamento, e o sistema cobra uma taxa fixa que é depois cobrada na fatura mensal, de acordo com a tabela de preços. Não é necessário nenhuma ação pela empresa cliente - todo o processo é automatizado.
 
 ## 6. Reembolso do DIFAL
 
 O reembolso do DIFAL pago no momento do envio é realizado juntamente com a nota fiscal mensal dos serviços de logística e entregas. Este reembolso aparece na fatura mensal como um crédito, compensando o DIFAL pago anteriormente.`;
+    }
+};
+
+/**
+ * Gera explicação completa do processo de emissão de notas fiscais no envio usando Gemini AI
+ */
+export const generateProcessoNotasFiscaisExplanation = async (): Promise<string> => {
+    const cacheKey = 'processo-notas-fiscais-envio';
+    const cached = contentCache.get(cacheKey);
+    
+    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+        return cached.content;
+    }
+
+    const prompt = `
+        Crie uma explicação completa e detalhada em português do Brasil sobre o processo de emissão de notas fiscais no momento do envio ao cliente pela Yoobe.
+        
+        IMPORTANTE: Esta explicação deve focar APENAS no momento do envio (as 3 notas emitidas). Não repita informações sobre o ciclo completo de notas fiscais, que já é explicado em outra seção.
+        
+        A explicação deve cobrir:
+        
+        1. **Contexto Inicial**:
+           - O processo inicia com a entrada de material no estoque, nota de venda para entrega futura, ou nota fiscal de venda simples (quando há venda com pagamento)
+           - Em vendas com pagamento, a nota fiscal de venda simples é enviada diretamente ao cliente
+           - Em vendas com pontos (cliente não paga), é emitida nota fiscal de doação
+           - A nota fiscal de serviços é emitida a partir de SP com lucro presumido
+        
+        2. **No Momento do Envio - 3 Notas Fiscais Emitidas Simultaneamente**:
+           
+           a) **Nota Fiscal de Doação (NF-e)**:
+              - Natureza da operação: "Remessa em bonificação, doação ou brinde"
+              - CFOP: 6949
+              - Destinatário: Cliente final que receberá o produto
+              - Valor simbólico
+              - IMPORTANTE: Esta nota é emitida no momento do envio, independente se houve venda com pagamento ou venda com pontos anteriormente
+              - Explicar o propósito desta nota no contexto do envio
+           
+           b) **Nota Fiscal de Retorno Simbólico (NF-e)**:
+              - Natureza da operação: "Retorno simbólico de mercadoria"
+              - CFOP: 1949
+              - Destinatário: Logística (empresa parceira)
+              - Valor simbólico: R$ 1,00
+              - Explicar o propósito desta nota e por que é necessária para fechar o ciclo contábil
+           
+           c) **GNRE (Guia Nacional de Recolhimento de Tributos Estaduais)**:
+              - Documento para pagamento do DIFAL ao estado de destino
+              - Código da Receita: 100102
+              - Valor Principal: Valor do DIFAL calculado
+              - Referência à NF-e de origem
+              - Explicar que o DIFAL é automaticamente cobrado e pago pela Yoobe via gateway de pagamento integrado
+              - O sistema cobra uma taxa fixa que é depois cobrada na fatura mensal
+        
+        3. **Fluxo no Momento do Envio**:
+           - Produto armazenado na logística
+           - Momento do envio → 3 notas emitidas simultaneamente
+           - Conexão com nota fiscal mensal de serviços (reembolso do DIFAL)
+        
+        4. **Referências Legais** (pesquise e mencione):
+           - Lei 12.741/2012 (tributação aproximada)
+           - Legislação sobre NF-e de doação/brinde
+           - Legislação sobre retorno simbólico
+           - Regulamentação do DIFAL e GNRE
+        
+        5. **Informações Importantes**:
+           - Não é necessário nenhuma ação pela empresa cliente
+           - Todo o processo é automatizado
+           - A nota fiscal de serviços é emitida de SP com lucro presumido
+           - As 3 notas são emitidas independente da situação inicial (entrada estoque, venda com pagamento, ou venda com pontos)
+        
+        O texto deve ser:
+        - Técnico mas acessível para o departamento financeiro
+        - Visualmente organizado com seções claras
+        - Focar APENAS no momento do envio (não repetir informações do ciclo completo)
+        - Destacar os momentos importantes do processo de envio
+        - Máximo de 800 palavras
+        - Incluir referências legais quando relevante
+        
+        **IMPORTANTE - Formato do Conteúdo:**
+        - NÃO inclua assinaturas, saudações finais
+        - NÃO use placeholders
+        - O conteúdo deve ser puramente informativo
+        - Use o nome "Yoobe" ao se referir à empresa
+        - Organize em seções numeradas ou com subtítulos
+        - Use markdown para formatação
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+
+        const content = response.text;
+        contentCache.set(cacheKey, { content, timestamp: Date.now() });
+        return content;
+    } catch (error) {
+        console.error('Error generating processo notas fiscais explanation:', error);
+        // Fallback para conteúdo estático
+        return `# Processo de Emissão de Notas Fiscais no Envio - Yoobe
+
+## Contexto Inicial
+
+O processo de notas fiscais da Yoobe pode iniciar de diferentes formas:
+- Entrada de material no estoque (Nota Fiscal de Venda para Entrega Futura)
+- Venda com pagamento (Nota Fiscal de Venda simples, enviada diretamente ao cliente)
+- Venda com pontos (Nota Fiscal de Doação, quando cliente não paga)
+
+A nota fiscal de serviços é emitida a partir de São Paulo (SP) com regime de lucro presumido.
+
+## No Momento do Envio - 3 Notas Fiscais Emitidas Simultaneamente
+
+Quando um produto é enviado ao cliente final, são emitidas simultaneamente três notas fiscais, independente da situação inicial:
+
+### 1. Nota Fiscal de Doação (NF-e)
+
+**Natureza da Operação**: Remessa em bonificação, doação ou brinde
+**CFOP**: 6949
+**Destinatário**: Cliente final que receberá o produto
+**Valor**: Simbólico
+
+Esta nota fiscal é emitida para o cliente final que receberá o produto no momento do envio, caracterizando a operação como uma doação ou brinde, conforme a legislação tributária brasileira. É importante destacar que esta nota é emitida no momento do envio, independente se houve venda com pagamento ou venda com pontos anteriormente.
+
+### 2. Nota Fiscal de Retorno Simbólico (NF-e)
+
+**Natureza da Operação**: Retorno simbólico de mercadoria
+**CFOP**: 1949
+**Destinatário**: Logística (empresa parceira)
+**Valor**: R$ 1,00
+
+Esta nota fiscal é necessária para documentar o retorno simbólico da mercadoria para a logística, fechando o ciclo contábil da operação.
+
+### 3. GNRE (Guia Nacional de Recolhimento de Tributos Estaduais)
+
+**Código da Receita**: 100102
+**Valor Principal**: Valor do DIFAL calculado
+**Referência**: NF-e de origem
+
+A GNRE é o documento utilizado para o pagamento do DIFAL (Diferencial de Alíquota do ICMS) ao estado de destino. O DIFAL é automaticamente calculado, cobrado e pago pela Yoobe utilizando um gateway de pagamento integrado. O sistema cobra uma taxa fixa que é depois cobrada na fatura mensal, de acordo com a tabela de preços. Não é necessário nenhuma ação pela empresa cliente.
+
+## Fluxo no Momento do Envio
+
+1. **Armazenamento**: Produto permanece armazenado na logística da Yoobe
+2. **Envio**: No momento do envio, as 3 notas fiscais são emitidas simultaneamente
+3. **Fatura Mensal**: O reembolso do DIFAL pago aparece na fatura mensal de serviços
+
+## Referências Legais
+
+- Lei 12.741/2012: Estabelece normas sobre a tributação aproximada
+- Legislação NF-e: Regulamenta a emissão de notas fiscais eletrônicas
+- Regulamentação DIFAL: Define o diferencial de alíquota do ICMS
+- GNRE: Guia Nacional de Recolhimento de Tributos Estaduais
+
+## Informações Importantes
+
+- Todo o processo é automatizado - não é necessário nenhuma ação pela empresa cliente
+- A nota fiscal de serviços é emitida de SP com lucro presumido
+- As 3 notas são emitidas independente da situação inicial (entrada estoque, venda com pagamento, ou venda com pontos)
+- Todos os valores são transparentes e aparecem detalhadamente nas faturas mensais`;
     }
 };
 

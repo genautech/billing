@@ -16,17 +16,19 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, className 
     const elements: React.ReactNode[] = [];
     let currentList: string[] = [];
     let listType: 'ul' | 'ol' | null = null;
+    let listCounter = 0; // Stable counter for list keys
 
     const flushList = () => {
         if (currentList.length > 0 && listType) {
             const ListComponent = listType === 'ul' ? 'ul' : 'ol';
             const listClass = listType === 'ul' 
-                ? 'list-disc list-inside space-y-2 my-4 ml-6 text-gray-700' 
-                : 'list-decimal list-inside space-y-2 my-4 ml-6 text-gray-700';
+                ? 'list-disc space-y-2 my-4 ml-6 text-gray-700' 
+                : 'list-decimal space-y-2 my-4 ml-6 text-gray-700';
+            const currentListKey = listCounter++;
             elements.push(
-                <ListComponent key={`list-${elements.length}`} className={listClass}>
+                <ListComponent key={`list-${currentListKey}`} className={listClass}>
                     {currentList.map((item, idx) => (
-                        <li key={idx} className="leading-relaxed pl-1">
+                        <li key={`item-${currentListKey}-${idx}`} className="leading-relaxed pl-2 mb-2">
                             {renderInlineMarkdown(item)}
                         </li>
                     ))}
@@ -40,11 +42,12 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, className 
     lines.forEach((line, index) => {
         const trimmed = line.trim();
 
-        // Linha vazia
+        // Linha vazia - criar separação entre parágrafos
         if (!trimmed) {
             flushList();
-            if (index > 0 && index < lines.length - 1) {
-                elements.push(<br key={`br-${index}`} />);
+            // Adicionar espaçamento visual entre parágrafos
+            if (index > 0 && index < lines.length - 1 && elements.length > 0) {
+                // Não adicionar <br>, o espaçamento será feito pelo mb-4 dos parágrafos
             }
             return;
         }
@@ -111,7 +114,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, className 
         flushList();
         const renderedLine = renderInlineMarkdown(trimmed);
         elements.push(
-            <p key={`p-${index}`} className="text-gray-700 leading-relaxed mb-3 first:mt-0">
+            <p key={`p-${index}`} className="text-gray-700 leading-relaxed mb-4 first:mt-0 text-base">
                 {renderedLine}
             </p>
         );
@@ -120,8 +123,8 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, className 
     flushList();
 
     return (
-        <div className={`prose prose-lg max-w-none ${className}`}>
-            <div className="text-gray-700 space-y-2">
+        <div className={`prose prose-sm max-w-none ${className}`}>
+            <div className="text-gray-700 space-y-1">
                 {elements.length > 0 ? elements : <p className="text-gray-600 italic">Conteúdo não disponível.</p>}
             </div>
         </div>

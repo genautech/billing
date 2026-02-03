@@ -2,6 +2,51 @@
 
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 
+## [2026-01-04] - Verificação, Correções e Documentação do Sistema de Faturas
+
+### 🐛 Correções de Bugs
+
+#### Corrigido
+- ✅ **Coluna T não encontrada**: Agora usa o preço do item de picking (0-1 itens) como base em vez de lógica incorreta
+- ✅ **Item de picking não encontrado**: Mensagem de erro mais clara e uso de logs de erro (não apenas warning)
+- ✅ **Colunas sem match**: Agora bloqueia processamento se mais de 50% das colunas não tiverem correspondência
+- ✅ **Discrepâncias pequenas**: Aumentado threshold de R$0.01 para R$0.10 para evitar micro-ajustes
+- ✅ **Valor total zerado**: Agora lança erro bloqueando o processamento se a fatura tem valor zero mas contém detalhes
+- ✅ **Nenhum pedido processado**: Agora lança erro se nenhum pedido do Track Report foi encontrado no Order Detail
+
+### 📝 Documentação
+
+#### Adicionado
+- ✅ Seção de troubleshooting específica para geração de faturas em TROUBLESHOOTING.md
+- ✅ Documentação do formato esperado dos CSVs
+- ✅ Documentação das colunas de custo e matching dinâmico
+- ✅ Tabela de formato dos CSVs em FEATURES.md
+
+### 🔍 Análise do Sistema de Faturas
+
+#### Verificado e Funcionando
+- ✅ Função `processarFatura()` - lógica de processamento principal
+- ✅ Função `salvarCobrancaProcessada()` - persistência no Firestore
+- ✅ Matching dinâmico de colunas CSV para tabela de preços
+- ✅ Cálculo de preço de venda com margem (`calculatePrecoVenda`)
+- ✅ Cálculo especial para templates (`calculatePrecoVendaForDisplay`)
+- ✅ Validações de entrada (tabela vazia, cliente não encontrado, colunas faltando)
+- ✅ Logs extensivos para debug
+- ✅ Tratamento de casos extremos (CSVs vazios, colunas faltando)
+
+#### Melhorias Implementadas
+- ✅ Melhor fallback quando coluna T não é encontrada
+- ✅ Validação mais rigorosa para colunas sem match (bloqueia se >50%)
+- ✅ Threshold de discrepância aumentado para R$0.10
+- ✅ Bloqueio de processamento quando valor total é zero
+
+#### Potenciais Melhorias Futuras
+- [ ] Adicionar validação mais estrita para formato de datas
+- [ ] Implementar modo de preview antes de salvar fatura
+- [ ] Adicionar testes automatizados para a função processarFatura
+
+---
+
 ## [2025-11-15] - Deploy para Produção
 
 ### 🚀 Deploy e Infraestrutura
@@ -135,4 +180,8 @@ Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 - Sem testes automatizados ainda
 - Sem notificações por email
 - Sem exportação Excel (apenas PDF e CSV)
+
+
+
+
 

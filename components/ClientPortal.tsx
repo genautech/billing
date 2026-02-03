@@ -89,6 +89,8 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ isAdminViewing, authenticat
     }, [isAdminViewing]);
 
     // Load price table when client changes
+    // Now using client's price table (with their custom margins)
+    // because client table items have IDs that match global table
     useEffect(() => {
         const loadPriceTable = async () => {
             if (!currentClient) return;
@@ -169,6 +171,8 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ isAdminViewing, authenticat
                         getDetalhesByCobrancaId(selectedCobranca.id),
                         getCustosAdicionaisByCobrancaId(selectedCobranca.id)
                     ]);
+                    console.log('📋 ClientPortal - Detalhes loaded, count:', detalhesData.length);
+                    console.log('📋 ClientPortal - Sample tabelaPrecoItemIds:', detalhesData.slice(0, 5).map(d => d.tabelaPrecoItemId));
                     setSelectedDetalhes(detalhesData);
                     setSelectedCustosAdicionais(custosAdicionaisData);
                 } catch (error) {
@@ -280,6 +284,8 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ isAdminViewing, authenticat
                             clientCobrancas={clientCobrancas} 
                             selectedCobranca={selectedCobranca}
                             onCobrancaChange={setSelectedCobranca}
+                            detalhesByCobrancaId={selectedCobranca ? { [selectedCobranca.id]: selectedDetalhes } : {}}
+                            tabelaPrecos={tabelaPrecos}
                         />;
             case 'precos':
                 return <ClientPriceTable tabelaPrecos={tabelaPrecos} />;

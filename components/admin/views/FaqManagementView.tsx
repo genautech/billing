@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { addFaqItem, updateFaqItem, deleteFaqItem } from '../../../services/firestoreService';
+import { addFaqItem, updateFaqItem, deleteFaqItem, seedNotasFiscaisFaqs } from '../../../services/firestoreService';
 import type { FaqItem } from '../../../types';
 import { useToast } from '../../../contexts/ToastContext';
 import { FormInput } from '../../ui/FormControls';
@@ -12,6 +12,7 @@ interface FaqManagementViewProps {
 const FaqManagementView: React.FC<FaqManagementViewProps> = ({ faqs, onUpdate }) => {
     const [isFormOpen, setIsFormOpen] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isGeneratingNotasFiscais, setIsGeneratingNotasFiscais] = useState(false);
     const [current, setCurrent] = useState<Omit<FaqItem, 'id'>>({ pergunta: '', resposta: '' });
     const [currentId, setCurrentId] = useState<string | null>(null);
     const { addToast } = useToast();
@@ -59,6 +60,21 @@ const FaqManagementView: React.FC<FaqManagementViewProps> = ({ faqs, onUpdate })
             setIsSubmitting(false);
         }
     };
+
+    const handleGenerateNotasFiscaisFaqs = async () => {
+        if (!window.confirm('Isso irá gerar e adicionar FAQs sobre notas fiscais. Continuar?')) return;
+        setIsGeneratingNotasFiscais(true);
+        try {
+            await seedNotasFiscaisFaqs();
+            addToast('FAQs sobre notas fiscais geradas e adicionadas com sucesso!', 'success');
+            onUpdate();
+        } catch (error) {
+            addToast('Erro ao gerar FAQs sobre notas fiscais.', 'error');
+            console.error('Error generating notas fiscais FAQs:', error);
+        } finally {
+            setIsGeneratingNotasFiscais(false);
+        }
+    };
     
     return (
         <div className="bg-white p-6 rounded-lg shadow-md space-y-6">
@@ -69,7 +85,17 @@ const FaqManagementView: React.FC<FaqManagementViewProps> = ({ faqs, onUpdate })
                         Crie e gerencie as perguntas e respostas que aparecerão na Central de Ajuda do cliente. Use esta seção para esclarecer dúvidas comuns sobre o sistema, faturamento e processos.
                     </p>
                 </div>
-                <button onClick={handleAddNew} className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 shadow-sm font-medium flex-shrink-0 whitespace-nowrap">+ Nova Pergunta</button>
+                <div className="flex gap-2">
+                    <button 
+                        onClick={handleGenerateNotasFiscaisFaqs} 
+                        disabled={isGeneratingNotasFiscais}
+                        className="bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 shadow-sm font-medium flex-shrink-0 whitespace-nowrap disabled:bg-gray-400"
+                        title="Gera e adiciona FAQs sobre notas fiscais automaticamente"
+                    >
+                        {isGeneratingNotasFiscais ? 'Gerando...' : '📄 Gerar FAQs de Notas Fiscais'}
+                    </button>
+                    <button onClick={handleAddNew} className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 shadow-sm font-medium flex-shrink-0 whitespace-nowrap">+ Nova Pergunta</button>
+                </div>
             </div>
             {isFormOpen && (
                 <form onSubmit={handleSubmit} className="mb-6 p-4 border rounded-lg bg-gray-50">
