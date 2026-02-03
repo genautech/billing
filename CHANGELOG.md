@@ -2,6 +2,46 @@
 
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 
+## [2026-02-03] - Deploy de Produção e Atualizações Gerais
+
+### 🚀 Deploy
+
+#### Deploy para Produção
+- ✅ Deploy automático acionado via Cloud Build
+- ✅ 41 arquivos atualizados (+7747 linhas, -1338 linhas)
+- ✅ URL de produção: https://billing-app-saisynpc3a-uc.a.run.app
+
+### ✨ Novos Componentes
+
+#### Adicionados
+- ✅ `NotaFiscalModelViewer` - Visualizador de modelo de nota fiscal
+- ✅ `ProcessoNotasFiscaisFlow` - Fluxo do processo de notas fiscais
+- ✅ `GoogleDrivePicker` - Seletor de arquivos do Google Drive
+- ✅ `MultiFileInput` - Input para múltiplos arquivos
+
+### 📈 Melhorias
+
+#### InvoiceGenerationView
+- ✅ Melhorias no handling de arquivos
+- ✅ Novas funcionalidades de processamento
+
+#### ClientDashboard e ClientBillDetail
+- ✅ Novos recursos e melhorias de UX
+
+#### firestoreService
+- ✅ Novas operações de dados
+- ✅ Funções estendidas
+
+#### geminiContentService
+- ✅ Análise de IA aprimorada
+
+### 📝 Documentação
+- ✅ CHANGELOG atualizado
+- ✅ FEATURES atualizado
+- ✅ TROUBLESHOOTING expandido
+
+---
+
 ## [2026-01-04] - Verificação, Correções e Documentação do Sistema de Faturas
 
 ### 🐛 Correções de Bugs
