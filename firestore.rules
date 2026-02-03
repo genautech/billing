@@ -1,0 +1,54 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Regras de desenvolvimento - permitir tudo
+    // IMPORTANTE: Em produção com autenticação, usar regras mais restritivas
+    
+    // Clientes
+    match /clientes/{clienteId} {
+      allow read, write: if true;
+    }
+    
+    // Tabela de Preços Global
+    match /tabelaPrecos/{itemId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // Tabela de Preços por Cliente
+    match /tabelaPrecosClientes/{tableId} {
+      allow read, write: if true;
+    }
+    
+    // Cobranças Mensais
+    match /cobrancasMensais/{cobrancaId} {
+      allow read, write: if true;
+      
+      // Subcollections
+      match /detalhesEnvio/{detalheId} {
+        allow read, write: if true;
+      }
+      
+      match /custosAdicionais/{custoId} {
+        allow read, write: if true;
+      }
+    }
+    
+    // Configurações
+    match /configuracoes/{configId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // FAQ
+    match /faq/{faqId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // Presets de custos manuais
+    match /custoManualPresets/{presetId} {
+      allow read, write: if true;
+    }
+  }
+}
