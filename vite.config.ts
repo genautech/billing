@@ -18,6 +18,18 @@ export default defineConfig(({ mode }) => {
         alias: {
           '@': path.resolve(__dirname, '.'),
         }
-      }
+      },
+      build: {
+        sourcemap: mode !== 'production',
+        rollupOptions: {
+          output: {
+            manualChunks: {
+              vendor: ['react', 'react-dom'],
+              firebase: ['firebase/compat/app', 'firebase/compat/firestore', 'firebase/compat/storage'],
+              charts: ['recharts'],
+            },
+          },
+        },
+      },
     };
 });
