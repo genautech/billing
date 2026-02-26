@@ -14,14 +14,15 @@ Yoobe Logistics Billing System — a React 19 + TypeScript + Vite frontend-only 
 
 ### Build / Lint / Test
 
-- **Build:** `npm run build` — Vite production build (outputs to `dist/`).
-- **Lint:** No ESLint or Prettier is configured in this repo. Use `npx tsc --noEmit` for type-checking; note there are pre-existing TS errors that do not block the Vite build.
+- **Build:** `npm run build` — Vite production build (outputs to `dist/`). Chunks are split into vendor, firebase, and charts.
+- **Lint:** `npm run lint` — ESLint with typescript-eslint. Pre-existing warnings/errors exist in the codebase; they do not block the build.
+- **Type-check:** `npm run typecheck` — runs `tsc --noEmit`. A few pre-existing TS errors exist but do not block Vite builds.
 - **Test:** No test framework is configured. There are no automated tests.
 
 ### Environment variables
 
 - `GEMINI_API_KEY` — optional; enables AI analysis features. Set in `.env.local` (see `.env.example`).
-- Firebase config is **not** via env vars; it is hardcoded in `services/firebase.ts`.
+- `VITE_FIREBASE_*` — Firebase config via env vars with hardcoded fallbacks in `services/firebase.ts`. Set in `.env.local` to override defaults.
 
 ### Gotchas
 
