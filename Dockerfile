@@ -2,20 +2,19 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 
-# Build argument for API key
-ARG GEMINI_API_KEY
+# GEMINI_API_KEY is injected at build time so Vite can inline it into the bundle.
+# Prefer passing it via --build-arg from a CI secret rather than baking it into
+# the image layer cache. The key is also set at runtime on Cloud Run via
+# Secret Manager for any server-side use.
+ARG GEMINI_API_KEY=""
 ENV GEMINI_API_KEY=$GEMINI_API_KEY
 
-# Copy package files
+# Copy package files and install dependencies
 COPY package*.json ./
+RUN npm ci
 
-# Install dependencies
-RUN npm ci --only=production=false
-
-# Copy source code
+# Copy source code and build
 COPY . .
-
-# Build the application
 RUN npm run build
 
 # Production stage with nginx
@@ -31,9 +30,7 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Expose port (Cloud Run will set PORT env var)
 EXPOSE 8080
 
-# Start nginx with entrypoint script
 ENTRYPOINT ["/entrypoint.sh"]
 

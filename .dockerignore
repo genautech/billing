@@ -20,4 +20,7 @@ coverage
 *.swp
 *.swo
 *~
+*.md
+AGENTS.md
+eslint.config.js
 

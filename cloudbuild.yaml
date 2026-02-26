@@ -1,5 +1,9 @@
 steps:
-  # Build the Docker image with API key from Secret Manager
+  # Build the Docker image.
+  # GEMINI_API_KEY is passed as a build arg because Vite inlines it into the
+  # JS bundle at build time via process.env.GEMINI_API_KEY. The runtime
+  # --set-secrets in the deploy step makes it available as an env var for any
+  # future server-side use.
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
