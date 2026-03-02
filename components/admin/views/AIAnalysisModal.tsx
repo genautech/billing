@@ -9,7 +9,7 @@ interface AIAnalysisModalProps {
     data: AIAnalysis | null;
 }
 
-const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
 
 const renderAnalyzing = () => (
     <div className="flex flex-col items-center justify-center p-8">

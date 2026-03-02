@@ -1,7 +1,8 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
+import { ResponsiveContainer, PieChart as RechartsPieChart, Pie, Cell, Tooltip } from 'recharts';
 import type { CobrancaMensal, DetalheEnvio, TabelaPrecoItem, Cliente, CustoAdicional, DocumentoPedido, GeneralSettings, ComprovanteDifal } from '../types';
 // FIX: Corrected import path
-import { generateClientInvoiceAnalysis, confirmarRecebimentoFatura, calculatePrecoVenda, calculatePrecoVendaForDisplay, isTemplateItem, getDocumentosByCobrancaId, getGeneralSettings } from '../services/firestoreService';
+import { generateClientInvoiceAnalysis, confirmarRecebimentoFatura, calculatePrecoVenda, calculatePrecoVendaForDisplay, isTemplateItem, getCostCategoryGroupForItem, getDisplayDescriptionForPriceItem, getDocumentosByCobrancaId, getGeneralSettings, createFindItemPreco } from '../services/firestoreService';
 import { generateCicloNotaFiscalExplanation } from '../services/geminiContentService';
 import { useToast } from '../contexts/ToastContext';
 import MarkdownRenderer from './MarkdownRenderer';
@@ -78,8 +79,9 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
     const [analysisResult, setAnalysisResult] = useState('');
     
     // State for view toggle
-    const [viewMode, setViewMode] = useState<'categorized' | 'table'>('categorized');
+    const [viewMode, setViewMode] = useState<'byCategory' | 'categorized' | 'table'>('byCategory');
     const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
+    const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
     
     // State for Documents and Payment
     const [documentos, setDocumentos] = useState<DocumentoPedido[]>([]);
@@ -197,6 +199,34 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                 heightLeft -= pageHeight;
             }
         }
+
+        const downloadLinks: { label: string; url: string }[] = [];
+        if (cobranca.trackReportDownloadUrl) downloadLinks.push({ label: 'Relatório de Rastreio (Track Report)', url: cobranca.trackReportDownloadUrl });
+        if (cobranca.orderDetailListagemDownloadUrl) downloadLinks.push({ label: 'Relatório de Envios (Order Detail – listagem)', url: cobranca.orderDetailListagemDownloadUrl });
+        (cobranca.arquivosComplementares || []).forEach((arq) => downloadLinks.push({ label: arq.nome, url: arq.url }));
+
+        if (downloadLinks.length > 0) {
+            const marginLeft = 15;
+            const marginTop = 15;
+            pdf.addPage();
+            pdf.setFontSize(14);
+            pdf.text('Arquivos complementares', marginLeft, marginTop + 10);
+            pdf.setFontSize(10);
+            let y = marginTop + 20;
+            for (const item of downloadLinks) {
+                pdf.setTextColor(0, 0, 0);
+                pdf.text(`${item.label}: `, marginLeft, y);
+                const labelWidth = pdf.getTextWidth(`${item.label}: `);
+                if (typeof pdf.textWithLink === 'function') {
+                    pdf.setTextColor(0, 0, 255);
+                    pdf.textWithLink('Download', marginLeft + labelWidth, y, { url: item.url });
+                    pdf.setTextColor(0, 0, 0);
+                } else {
+                    pdf.text(`Download (${item.url})`, marginLeft + labelWidth, y);
+                }
+                y += 8;
+            }
+        }
         
         const safeMonth = cobranca.mesReferencia.replace(/[^a-z0-9]/gi, '-');
         pdf.save(`fatura-${client?.nome?.toLowerCase().replace(' ','-')}-${safeMonth}.pdf`);
@@ -228,40 +258,20 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                 ].join(',');
             }
             
-            const isShippingItem = itemPreco.categoria === 'Envios' || itemPreco.categoria === 'Retornos';
-            const isDifalItem = itemPreco.categoria === 'Difal' || itemPreco.descricao?.toLowerCase().includes('difal');
-            const isTemplate = isTemplateItem(itemPreco);
-            const isVariableCost = isTemplate || isShippingItem || isDifalItem;
-            
-            let precoUnitario: number;
-            let quantidadeExibida: number;
-            
-            if (isDifalItem) {
-                // DIFAL: Apply minimum R$ 3,00 - use calculatePrecoVenda which now includes DIFAL minimum
-                quantidadeExibida = 1;
-                const DIFAL_MIN_PRICE = 3.00;
-                const calculatedPrice = calculatePrecoVenda(itemPreco, detalhe.quantidade);
-                precoUnitario = Math.max(calculatedPrice, DIFAL_MIN_PRICE);
-            } else if (isVariableCost) {
-                quantidadeExibida = 1;
-                precoUnitario = calculatePrecoVenda(itemPreco, detalhe.quantidade);
-            } else {
-                precoUnitario = calculatePrecoVendaForDisplay(itemPreco);
-                quantidadeExibida = detalhe.quantidade;
-            }
-            
+            const precoUnitario = getPrecoUnitarioDetalhe(detalhe, itemPreco);
+            const quantidadeExibida = getQuantidadeExibida(detalhe, itemPreco);
             const subtotal = precoUnitario * quantidadeExibida;
-            
+
             return [
                 formatDate(detalhe.data),
                 detalhe.rastreio,
                 detalhe.codigoPedido,
                 itemPreco.categoria,
                 itemPreco.subcategoria,
-                itemPreco.descricao,
+                getDisplayDescriptionForPriceItem(itemPreco.descricao),
                 quantidadeExibida,
-                precoUnitario.toFixed(4),
-                subtotal.toFixed(4)
+                precoUnitario.toFixed(2),
+                subtotal.toFixed(2)
             ].join(',');
         });
         
@@ -269,13 +279,13 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
         const additionalCostRows = custosAdicionais
             .filter(custo => !custo.isReembolso)
             .map(custo => 
-                ['-', '-', '-', 'Custo Adicional', custo.categoria || '-', custo.descricao, 1, custo.valor.toFixed(4), custo.valor.toFixed(4)].join(',')
+                ['-', '-', '-', 'Custo Adicional', custo.categoria || '-', getDisplayDescriptionForPriceItem(custo.descricao), 1, custo.valor.toFixed(2), custo.valor.toFixed(2)].join(',')
             );
         
         const reembolsoRows = custosAdicionais
             .filter(custo => custo.isReembolso)
             .map(custo => 
-                ['-', '-', '-', 'Reembolso', custo.motivoReembolso || '-', custo.descricao, 1, (-custo.valor).toFixed(4), (-custo.valor).toFixed(4)].join(',')
+                ['-', '-', '-', 'Reembolso', custo.motivoReembolso || '-', getDisplayDescriptionForPriceItem(custo.descricao), 1, (-custo.valor).toFixed(2), (-custo.valor).toFixed(2)].join(',')
             );
 
         const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows, ...additionalCostRows, ...reembolsoRows].join('\n');
@@ -289,7 +299,7 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
         document.body.removeChild(link);
     };
 
-    const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+    const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
     const formatDate = (dateString: string) => new Date(dateString + 'T00:00:00').toLocaleDateString('pt-BR');
     // getPrecoItemInfo is defined after findItemPreco below
 
@@ -310,8 +320,9 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
         const totalCustosRegulares = custosRegulares.reduce((sum, c) => sum + c.valor, 0);
         const totalReembolsos = reembolsos.reduce((sum, c) => sum + c.valor, 0);
 
-        if (totalCustosRegulares > 0) {
-            totals['Custos Adicionais'] = totalCustosRegulares;
+        const custosAdicionaisTotal = cobranca.totalCustosAdicionais ?? totalCustosRegulares;
+        if (custosAdicionaisTotal > 0) {
+            totals['Custos Adicionais'] = custosAdicionaisTotal;
         }
 
         if (totalReembolsos > 0) {
@@ -332,76 +343,34 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
         return { orderCount, costPerOrder };
     }, [detalhes, cobranca.valorTotal]);
 
-    // Helper to find price item by ID, with fallback strategies
-    // This handles cases where the price table IDs have changed after invoice generation
-    const findItemPreco = useMemo(() => {
-        // Create lookup maps
-        const byId = new Map<string, TabelaPrecoItem>();
-        const byDesc = new Map<string, TabelaPrecoItem>();
-        
-        // Cache special items for fallback
-        let difalItem: TabelaPrecoItem | undefined;
-        let shippingItems: TabelaPrecoItem[] = [];
-        
-        tabelaPrecos.forEach(item => {
-            byId.set(item.id, item);
-            const descKey = item.descricao?.toLowerCase().trim() || '';
-            if (descKey && !byDesc.has(descKey)) {
-                byDesc.set(descKey, item);
-            }
-            
-            // Cache DIFAL item
-            if (item.descricao?.toLowerCase().includes('difal') || 
-                (item.categoria === 'Custos Internos' && item.descricao?.toLowerCase().includes('difal'))) {
-                difalItem = item;
-            }
-            
-            // Cache shipping items
-            if (item.categoria === 'Envios' || item.categoria === 'Retornos') {
-                shippingItems.push(item);
-            }
-        });
-        
-        // Track unknown IDs to detect patterns
-        const unknownIdToItem = new Map<string, TabelaPrecoItem>();
-        
-        return (tabelaPrecoItemId: string, context?: { codigoPedido?: string; quantidade?: number }): TabelaPrecoItem | undefined => {
-            // First try by ID
-            const byIdResult = byId.get(tabelaPrecoItemId);
-            if (byIdResult) return byIdResult;
-            
-            // Check if we've already resolved this unknown ID
-            const cached = unknownIdToItem.get(tabelaPrecoItemId);
-            if (cached) return cached;
-            
-            // Heuristic: check all details with this ID to find patterns
-            // For now, use DIFAL as fallback for unknown IDs in certain patterns
-            // This is needed because old invoices have IDs that don't exist in current table
-            
-            // Try to infer the item type from the context
-            if (context?.codigoPedido) {
-                // If it's associated with an order (not ARMAZENAGEM), might be shipping or DIFAL
-                const isStorageOrder = context.codigoPedido.toUpperCase().includes('ARMAZENAGEM');
-                
-                if (!isStorageOrder) {
-                    // For orders, unknown items are likely DIFAL or shipping
-                    // Check quantity - DIFAL typically has quantidade=1 or small values
-                    if (context.quantidade !== undefined && context.quantidade <= 3 && difalItem) {
-                        unknownIdToItem.set(tabelaPrecoItemId, difalItem);
-                        return difalItem;
-                    }
-                }
-            }
-            
-            // Last resort: try to find by traversing all items and matching by description patterns
-            // This won't work without more context, so return undefined
-            return undefined;
-        };
-    }, [tabelaPrecos]);
+    // Resolve price item by ID with fallback for unknown/obsolete IDs (shared with dashboard)
+    const findItemPreco = useMemo(() => createFindItemPreco(tabelaPrecos), [tabelaPrecos]);
 
     // Helper function using findItemPreco with fallback (without context)
     const getPrecoItemInfo = (id: string | null, context?: { codigoPedido?: string; quantidade?: number }) => 
         id ? findItemPreco(id, context) : undefined;
+
+    // Effective unit price: manual override or calculated from table (used for client display)
+    const getPrecoUnitarioDetalhe = (detalhe: DetalheEnvio, itemPreco: TabelaPrecoItem | undefined): number => {
+        if (!itemPreco) return 0;
+        if (detalhe.precoUnitarioManual != null) return Number(detalhe.precoUnitarioManual);
+        const isShippingItem = itemPreco.categoria === 'Envios' || itemPreco.categoria === 'Retornos';
+        const isDifalItem = itemPreco.categoria === 'Difal' || itemPreco.descricao?.toLowerCase().includes('difal');
+        const isTemplate = isTemplateItem(itemPreco);
+        const DIFAL_MIN_PRICE = 3.00;
+        if (isDifalItem) return Math.max(calculatePrecoVenda(itemPreco, detalhe.quantidade), DIFAL_MIN_PRICE);
+        if (isTemplate || isShippingItem || isDifalItem) return calculatePrecoVenda(itemPreco, detalhe.quantidade);
+        return calculatePrecoVendaForDisplay(itemPreco);
+    };
+
+    const getQuantidadeExibida = (detalhe: DetalheEnvio, itemPreco: TabelaPrecoItem | undefined): number => {
+        if (!itemPreco) return 0;
+        const isShippingItem = itemPreco.categoria === 'Envios' || itemPreco.categoria === 'Retornos';
+        const isTemplate = isTemplateItem(itemPreco);
+        const isDifalItem = itemPreco.categoria === 'Difal' || itemPreco.descricao?.toLowerCase().includes('difal');
+        if (isDifalItem || (isShippingItem && !isTemplate)) return 1;
+        return detalhe.quantidade;
+    };
 
     // Extract storage breakdown from invoice details for transparent display
     const storageBreakdown = useMemo(() => {
@@ -410,11 +379,13 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
             .map(d => {
                 const itemPreco = findItemPreco(d.tabelaPrecoItemId, { quantidade: d.quantidade });
                 const label = d.codigoPedido?.replace('ARMAZENAGEM (', '').replace(')', '') || 'Item';
-                const subtotal = itemPreco ? calculatePrecoVendaForDisplay(itemPreco) * d.quantidade : 0;
+                const precoUnitario = getPrecoUnitarioDetalhe(d, itemPreco);
+                const qty = getQuantidadeExibida(d, itemPreco);
+                const subtotal = precoUnitario * qty;
                 return {
                     label,
                     quantidade: d.quantidade,
-                    precoUnitario: itemPreco?.precoVenda || 0,
+                    precoUnitario,
                     subtotal
                 };
             })
@@ -507,52 +478,9 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                     return;
                 }
                 
-                const isShippingItem = itemPreco.categoria === 'Envios' || itemPreco.categoria === 'Retornos';
-                const isDifalItem = itemPreco.categoria === 'Difal' || itemPreco.descricao?.toLowerCase().includes('difal');
-                const isTemplate = isTemplateItem(itemPreco);
-                const isVariableCost = isTemplate || isShippingItem || isDifalItem;
-                
-                let subtotal: number;
-                
-                if (isDifalItem) {
-                    // DIFAL: Apply minimum R$ 3,00
-                    const DIFAL_MIN_PRICE = 3.00;
-                    const calculatedPrice = calculatePrecoVenda(itemPreco, detalhe.quantidade);
-                    subtotal = Math.max(calculatedPrice, DIFAL_MIN_PRICE);
-                    if (debugCount < 5) {
-                        console.log('💰 orderTotals - DIFAL:', {
-                            pedido: orderCode,
-                            descricao: itemPreco.descricao,
-                            valorCSV: detalhe.quantidade,
-                            precoFinal: subtotal
-                        });
-                    }
-                } else if (isVariableCost) {
-                    // For variable costs (shipping, template items): apply margin to CSV cost
-                    subtotal = calculatePrecoVenda(itemPreco, detalhe.quantidade);
-                    if (debugCount < 5) {
-                        console.log('💰 orderTotals - Variable cost:', {
-                            pedido: orderCode,
-                            descricao: itemPreco.descricao,
-                            custoCSV: detalhe.quantidade,
-                            margem: itemPreco.margemLucro,
-                            subtotalCalculado: subtotal
-                        });
-                    }
-                } else {
-                    // For fixed costs: use price table value * quantity
-                    subtotal = calculatePrecoVendaForDisplay(itemPreco) * detalhe.quantidade;
-                    if (debugCount < 5) {
-                        console.log('📦 orderTotals - Fixed cost:', {
-                            pedido: orderCode,
-                            descricao: itemPreco.descricao,
-                            precoVenda: itemPreco.precoVenda,
-                            quantidade: detalhe.quantidade,
-                            subtotalCalculado: subtotal
-                        });
-                    }
-                }
-                
+                const precoUnitario = getPrecoUnitarioDetalhe(detalhe, itemPreco);
+                const quantidadeExibida = getQuantidadeExibida(detalhe, itemPreco);
+                const subtotal = precoUnitario * quantidadeExibida;
                 debugCount++;
                 orderTotal += subtotal;
             });
@@ -576,6 +504,80 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
             return newSet;
         });
     };
+
+    const toggleCategory = (category: string) => {
+        setExpandedCategories(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(category)) {
+                newSet.delete(category);
+            } else {
+                newSet.add(category);
+            }
+            return newSet;
+        });
+    };
+
+    // Group details by category only (aggregating same items within each category)
+    interface AggregatedItem {
+        descricao: string;
+        subcategoria: string;
+        quantidade: number;
+        subtotal: number;
+        precoUnitario: number;
+        tabelaPrecoItemId: string | null;
+    }
+
+    const groupedByCategory = useMemo(() => {
+        const grouped: Record<string, { items: AggregatedItem[]; total: number }> = {};
+        
+        filteredDetalhes.forEach(detalhe => {
+            const itemPreco = findItemPreco(detalhe.tabelaPrecoItemId, { 
+                codigoPedido: detalhe.codigoPedido, 
+                quantidade: detalhe.quantidade 
+            });
+            if (!itemPreco) return;
+            
+            const category = getCostCategoryGroupForItem(itemPreco) === 'custosAdicionais' ? 'Custos Adicionais' : (itemPreco.categoria || 'Outros');
+            
+            if (!grouped[category]) {
+                grouped[category] = { items: [], total: 0 };
+            }
+            
+            const precoUnitario = getPrecoUnitarioDetalhe(detalhe, itemPreco);
+            const quantidadeExibida = getQuantidadeExibida(detalhe, itemPreco);
+            const subtotal = precoUnitario * quantidadeExibida;
+
+            // Find if this item already exists in the category (aggregate by display description)
+            const displayDesc = getDisplayDescriptionForPriceItem(itemPreco.descricao);
+            const existingItem = grouped[category].items.find(
+                item => item.descricao === displayDesc && item.subcategoria === itemPreco.subcategoria
+            );
+            
+            if (existingItem) {
+                existingItem.quantidade += quantidadeExibida;
+                existingItem.subtotal += subtotal;
+            } else {
+                grouped[category].items.push({
+                    descricao: displayDesc,
+                    subcategoria: itemPreco.subcategoria,
+                    quantidade: quantidadeExibida,
+                    subtotal,
+                    precoUnitario,
+                    tabelaPrecoItemId: detalhe.tabelaPrecoItemId
+                });
+            }
+            
+            grouped[category].total += subtotal;
+        });
+        
+        // Sort categories by total (descending)
+        return Object.entries(grouped)
+            .sort(([, a], [, b]) => b.total - a.total)
+            .reduce((acc, [key, value]) => {
+                acc[key] = value;
+                return acc;
+            }, {} as Record<string, { items: AggregatedItem[]; total: number }>);
+    }, [filteredDetalhes, findItemPreco, tabelaPrecos]);
 
     // Orders start collapsed (not expanded) by default
     // Removed automatic expansion - users can expand orders manually if needed
@@ -652,6 +654,24 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                             <div>
                                 <h3 className="text-2xl font-bold text-gray-900">Fatura - {cobranca.mesReferencia}</h3>
                                 <p className="text-sm text-gray-500 mt-1">Resumo dos serviços prestados</p>
+                                <div className="flex flex-wrap gap-3 mt-2">
+                                    {(cobranca.periodoCobranca || cobranca.mesReferencia) && (
+                                        <span className="inline-flex items-center gap-1.5 text-xs text-gray-600 bg-gray-100 px-2.5 py-1 rounded-full">
+                                            <svg className="w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                            </svg>
+                                            {cobranca.periodoCobranca || cobranca.mesReferencia}
+                                        </span>
+                                    )}
+                                    {(cobranca.quantidadeEnviosDisplay ?? cobranca.quantidadeEnvios) != null && (
+                                        <span className="inline-flex items-center gap-1.5 text-xs text-gray-600 bg-gray-100 px-2.5 py-1 rounded-full">
+                                            <svg className="w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                                            </svg>
+                                            {(cobranca.quantidadeEnviosDisplay ?? cobranca.quantidadeEnvios)?.toLocaleString('pt-BR')} envios
+                                        </span>
+                                    )}
+                                </div>
                                 {client?.unidadesEmEstoque && (
                                     <p className="text-xs text-gray-400 mt-2">{client.unidadesEmEstoque.toLocaleString('pt-BR')} itens em estoque neste período.</p>
                                 )}
@@ -659,22 +679,63 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                             <div className="w-full sm:w-auto sm:min-w-[280px] space-y-4">
                                <div className="border border-gray-200 p-3 rounded-lg space-y-2">
                                     <h4 className="text-sm font-semibold text-gray-700">Resumo por Categoria</h4>
-                                    {categoryTotals.map(([categoria, total]) => {
-                                        const isReembolso = categoria === 'Reembolsos';
+                                    {(() => {
+                                        const totalVal = categoryTotals.reduce((s, [, v]) => s + Math.abs(v), 0);
+                                        const chartColors: Record<string, string> = {
+                                            'Envios': '#3b82f6',
+                                            'Custos Logísticos': '#8b5cf6',
+                                            'Armazenamento': '#a855f7',
+                                            'Custos Extras do Pedido': '#f97316',
+                                            'Custos Adicionais': '#f59e0b',
+                                            'Reembolsos': '#10b981'
+                                        };
+                                        const chartData = categoryTotals.map(([categoria, total]) => ({
+                                            name: categoria,
+                                            value: Math.abs(total),
+                                            color: chartColors[categoria] ?? '#6b7280'
+                                        })).filter(d => d.value > 0.001);
                                         return (
-                                            <div key={categoria} className={`flex justify-between items-center text-xs ${isReembolso ? 'bg-emerald-50 -mx-2 px-2 py-1 rounded' : ''}`}>
-                                                <span className={isReembolso ? 'text-emerald-600 font-medium' : 'text-gray-500'}>
-                                                    {categoria}
-                                                    {categoria === 'Envios' && cobranca.quantidadeEnvios !== undefined && cobranca.quantidadeEnvios > 0 && (
-                                                        <span className="text-gray-400 ml-1">({cobranca.quantidadeEnvios})</span>
-                                                    )}
-                                                </span>
-                                                <span className={`font-medium ${isReembolso ? 'text-emerald-700' : 'text-gray-800'}`}>
-                                                    {isReembolso ? `- ${formatCurrency(Math.abs(total))}` : formatCurrency(total)}
-                                                </span>
+                                            <div className="flex flex-col sm:flex-row gap-4 items-start">
+                                                {chartData.length > 0 && totalVal > 0 && (
+                                                    <div className="flex-shrink-0" style={{ width: '140px', height: '140px' }}>
+                                                        <ResponsiveContainer width="100%" height="100%">
+                                                            <RechartsPieChart>
+                                                                <Pie
+                                                                    data={chartData}
+                                                                    cx="50%"
+                                                                    cy="50%"
+                                                                    innerRadius={40}
+                                                                    outerRadius={65}
+                                                                    paddingAngle={2}
+                                                                    dataKey="value"
+                                                                >
+                                                                    {chartData.map((entry, index) => (
+                                                                        <Cell key={`cell-${index}`} fill={entry.color} />
+                                                                    ))}
+                                                                </Pie>
+                                                                <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                                                            </RechartsPieChart>
+                                                        </ResponsiveContainer>
+                                                    </div>
+                                                )}
+                                                <div className="flex-1 min-w-0 space-y-1">
+                                                    {categoryTotals.map(([categoria, total]) => {
+                                                        const isReembolso = categoria === 'Reembolsos';
+                                                        return (
+                                                            <div key={categoria} className={`flex justify-between items-center text-xs ${isReembolso ? 'bg-emerald-50 -mx-2 px-2 py-1 rounded' : ''}`}>
+                                                                <span className={isReembolso ? 'text-emerald-600 font-medium' : 'text-gray-500'}>
+                                                                    {categoria}
+                                                                </span>
+                                                                <span className={`font-medium ${isReembolso ? 'text-emerald-700' : 'text-gray-800'}`}>
+                                                                    {isReembolso ? `- ${formatCurrency(Math.abs(total))}` : formatCurrency(total)}
+                                                                </span>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
                                             </div>
                                         );
-                                    })}
+                                    })()}
                                </div>
                                
                                {/* Storage Breakdown Detail */}
@@ -793,6 +854,16 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                             <h4 className="text-lg font-semibold text-gray-800">Detalhamento dos Itens</h4>
                             <div className="flex items-center gap-2">
                                 <button
+                                    onClick={() => setViewMode('byCategory')}
+                                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                                        viewMode === 'byCategory'
+                                            ? 'bg-blue-600 text-white'
+                                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                    }`}
+                                >
+                                    Por Categoria
+                                </button>
+                                <button
                                     onClick={() => setViewMode('categorized')}
                                     className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
                                         viewMode === 'categorized'
@@ -815,7 +886,77 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                             </div>
                         </div>
 
-                    {viewMode === 'categorized' ? (
+                    {viewMode === 'byCategory' ? (
+                        <div className="space-y-4">
+                            {Object.entries(groupedByCategory).map(([category, data]) => {
+                                const { items, total } = data as { items: AggregatedItem[]; total: number };
+                                const isExpanded = expandedCategories.has(category);
+                                
+                                return (
+                                    <div key={category} className="border border-gray-200 rounded-lg overflow-hidden">
+                                        <button
+                                            onClick={() => toggleCategory(category)}
+                                            className="w-full bg-gradient-to-r from-gray-50 to-gray-100 hover:from-gray-100 hover:to-gray-150 px-4 py-3 flex items-center justify-between transition-colors"
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    className={`h-5 w-5 text-gray-500 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                                                    viewBox="0 0 20 20"
+                                                    fill="currentColor"
+                                                >
+                                                    <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                                                </svg>
+                                                <div className="text-left">
+                                                    <span className="font-semibold text-gray-900">{category}</span>
+                                                    <span className="ml-2 text-sm text-gray-500">
+                                                        ({items.length} {items.length === 1 ? 'item' : 'itens'})
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <span className="font-bold text-gray-900">{formatCurrency(total)}</span>
+                                        </button>
+                                        
+                                        {isExpanded && (
+                                            <div className="bg-white">
+                                                <div className="overflow-x-auto">
+                                                    <table className="min-w-full divide-y divide-gray-200">
+                                                        <thead className="bg-gray-50">
+                                                            <tr>
+                                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Serviço</th>
+                                                                <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qtd.</th>
+                                                                <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Preço Unit.</th>
+                                                                <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Subtotal</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="bg-white divide-y divide-gray-200">
+                                                            {items.map((item, idx) => (
+                                                                <tr key={`${item.descricao}-${idx}`}>
+                                                                    <td className="px-4 py-3 whitespace-normal text-sm text-gray-700">
+                                                                        <span className="font-medium">{item.subcategoria}</span>
+                                                                        <span className="text-gray-500"> - {item.descricao}</span>
+                                                                    </td>
+                                                                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600 text-right">{item.quantidade}</td>
+                                                                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600 text-right">{formatCurrency(item.precoUnitario)}</td>
+                                                                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-800 font-semibold text-right">{formatCurrency(item.subtotal)}</td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                        <tfoot className="bg-gray-50">
+                                                            <tr>
+                                                                <td colSpan={3} className="px-4 py-2 text-right text-sm font-medium text-gray-700">Total {category}</td>
+                                                                <td className="px-4 py-2 text-right text-sm font-bold text-gray-900">{formatCurrency(total)}</td>
+                                                            </tr>
+                                                        </tfoot>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    ) : viewMode === 'categorized' ? (
                         <div className="space-y-4">
                             {Object.entries(groupedByOrder).map(([orderCode, categories]) => {
                                 const isExpanded = expandedOrders.has(orderCode);
@@ -852,28 +993,9 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                                                     const categoryTotal = categoryDetails.reduce((sum, detalhe) => {
                                                         const itemPreco = getPrecoItemInfo(detalhe.tabelaPrecoItemId);
                                                         if (!itemPreco) return sum;
-                                                        
-                                                        const isShippingItem = itemPreco.categoria === 'Envios' || itemPreco.categoria === 'Retornos';
-                                                        const isDifalItem = itemPreco.categoria === 'Difal' || itemPreco.descricao?.toLowerCase().includes('difal');
-                                                        const isTemplate = isTemplateItem(itemPreco);
-                                                        const isVariableCost = isTemplate || isShippingItem || isDifalItem;
-                                                        
-                                                        let subtotal: number;
-                                                        
-                                                        if (isDifalItem) {
-                                                            // DIFAL: Apply minimum R$ 3,00
-                                                            const DIFAL_MIN_PRICE = 3.00;
-                                                            const calculatedPrice = calculatePrecoVenda(itemPreco, detalhe.quantidade);
-                                                            subtotal = Math.max(calculatedPrice, DIFAL_MIN_PRICE);
-                                                        } else if (isVariableCost) {
-                                                            // For variable costs: apply margin to CSV cost
-                                                            subtotal = calculatePrecoVenda(itemPreco, detalhe.quantidade);
-                                                        } else {
-                                                            // For fixed costs: use price table value * quantity
-                                                            subtotal = calculatePrecoVendaForDisplay(itemPreco) * detalhe.quantidade;
-                                                        }
-                                                        
-                                                        return sum + subtotal;
+                                                        const precoUnitario = getPrecoUnitarioDetalhe(detalhe, itemPreco);
+                                                        const quantidadeExibida = getQuantidadeExibida(detalhe, itemPreco);
+                                                        return sum + precoUnitario * quantidadeExibida;
                                                     }, 0);
                                                     
                                                     return (
@@ -896,41 +1018,17 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                                                                         </tr>
                                                                     </thead>
                                                                     <tbody className="bg-white divide-y divide-gray-200">
-                                                                        {categoryDetails.map(detalhe => {
+                                                                        {categoryDetails.map((detalhe, di) => {
                                                                             const itemPreco = getPrecoItemInfo(detalhe.tabelaPrecoItemId);
                                                                             if (!itemPreco) return null;
-                                                                            
-                                                                            const isShippingItem = itemPreco.categoria === 'Envios' || itemPreco.categoria === 'Retornos';
-                                                                            const isDifalItem = itemPreco.categoria === 'Difal' || itemPreco.descricao?.toLowerCase().includes('difal');
-                                                                            const isTemplate = isTemplateItem(itemPreco);
-                                                                            const isVariableCost = isTemplate || isShippingItem || isDifalItem;
-                                                                            
-                                                                            let precoUnitario: number;
-                                                                            let quantidadeExibida: number;
-                                                                            
-                                                                            if (isDifalItem) {
-                                                                                // DIFAL: Apply minimum R$ 3,00
-                                                                                quantidadeExibida = 1;
-                                                                                const DIFAL_MIN_PRICE = 3.00;
-                                                                                const calculatedPrice = calculatePrecoVenda(itemPreco, detalhe.quantidade);
-                                                                                precoUnitario = Math.max(calculatedPrice, DIFAL_MIN_PRICE);
-                                                                            } else if (isVariableCost) {
-                                                                                // For variable costs: apply margin to CSV cost
-                                                                                quantidadeExibida = 1;
-                                                                                precoUnitario = calculatePrecoVenda(itemPreco, detalhe.quantidade);
-                                                                            } else {
-                                                                                // For fixed costs: use price table value * quantity
-                                                                                precoUnitario = calculatePrecoVendaForDisplay(itemPreco);
-                                                                                quantidadeExibida = detalhe.quantidade;
-                                                                            }
-                                                                            
+                                                                            const precoUnitario = getPrecoUnitarioDetalhe(detalhe, itemPreco);
+                                                                            const quantidadeExibida = getQuantidadeExibida(detalhe, itemPreco);
                                                                             const subtotal = precoUnitario * quantidadeExibida;
-                                                                            
                                                                             return (
-                                                                                <tr key={detalhe.id}>
+                                                                                <tr key={`detalhe-${di}-${detalhe.id}`}>
                                                                                     <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{formatDate(detalhe.data)}</td>
                                                                                     <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 font-medium">{detalhe.rastreio}</td>
-                                                                                    <td className="px-4 py-3 whitespace-normal text-sm text-gray-500">{`${itemPreco.subcategoria} - ${itemPreco.descricao}`}</td>
+                                                                                    <td className="px-4 py-3 whitespace-normal text-sm text-gray-500">{`${itemPreco.subcategoria} - ${getDisplayDescriptionForPriceItem(itemPreco.descricao)}`}</td>
                                                                                     <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
                                                                                         {detalhe.estado ? (
                                                                                             <span className="inline-flex items-center px-2 py-1 rounded-md bg-blue-50 text-blue-700 text-xs font-medium">
@@ -974,45 +1072,20 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                                     </tr>
                                 </thead>
                                 <tbody className="bg-white divide-y divide-gray-200">
-                                    {filteredDetalhes.map(detalhe => {
+                                    {filteredDetalhes.map((detalhe, di) => {
                                         const itemPreco = getPrecoItemInfo(detalhe.tabelaPrecoItemId);
                                         if (!itemPreco) return null;
-                                        
-                                        // Special handling for non-template shipping items and DIFAL
-                                        const isShippingItem = itemPreco.categoria === 'Envios' || itemPreco.categoria === 'Retornos';
-                                        const isDifalItem = itemPreco.categoria === 'Difal' || itemPreco.descricao?.toLowerCase().includes('difal');
-                                        const isTemplate = isTemplateItem(itemPreco);
-                                        const isVariableCost = isTemplate || isShippingItem || isDifalItem;
-                                        
-                                        let precoUnitario: number;
-                                        let quantidadeExibida: number;
-                                        
-                                        if (isDifalItem) {
-                                            // DIFAL: Apply minimum R$ 3,00
-                                            quantidadeExibida = 1;
-                                            const DIFAL_MIN_PRICE = 3.00;
-                                            const calculatedPrice = calculatePrecoVenda(itemPreco, detalhe.quantidade);
-                                            precoUnitario = Math.max(calculatedPrice, DIFAL_MIN_PRICE);
-                                        } else if (isVariableCost) {
-                                            // For variable costs: apply margin to CSV cost
-                                            quantidadeExibida = 1;
-                                            precoUnitario = calculatePrecoVenda(itemPreco, detalhe.quantidade);
-                                        } else {
-                                            // For fixed costs: use price table value * quantity
-                                            precoUnitario = calculatePrecoVendaForDisplay(itemPreco);
-                                            quantidadeExibida = detalhe.quantidade;
-                                        }
-                                        
+                                        const precoUnitario = getPrecoUnitarioDetalhe(detalhe, itemPreco);
+                                        const quantidadeExibida = getQuantidadeExibida(detalhe, itemPreco);
                                         const subtotal = precoUnitario * quantidadeExibida;
-                                        
                                         return (
-                                            <tr key={detalhe.id}>
+                                            <tr key={`detalhe-${di}-${detalhe.id}`}>
                                                 <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(detalhe.data)}</td>
                                                 <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 font-medium">
                                                     <div>{detalhe.rastreio}</div>
                                                     <div className="text-xs text-gray-500">{detalhe.codigoPedido}</div>
                                                 </td>
-                                                <td className="px-4 py-4 whitespace-normal text-sm text-gray-500">{`${itemPreco.subcategoria} - ${itemPreco.descricao}`}</td>
+                                                <td className="px-4 py-4 whitespace-normal text-sm text-gray-500">{`${itemPreco.subcategoria} - ${getDisplayDescriptionForPriceItem(itemPreco.descricao)}`}</td>
                                                 <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-600">
                                                     {detalhe.estado ? (
                                                         <span className="inline-flex items-center px-2 py-1 rounded-md bg-blue-50 text-blue-700 text-xs font-medium">
@@ -1055,13 +1128,14 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                                     <tbody className="bg-white divide-y divide-indigo-50">
                                         {filteredDetalhes
                                             .filter(d => d.codigoPedido === 'ENTRADA DE MATERIAL')
-                                            .map(detalhe => {
+                                            .map((detalhe, di) => {
                                                 const itemPreco = getPrecoItemInfo(detalhe.tabelaPrecoItemId);
-                                                const precoVenda = itemPreco ? calculatePrecoVendaForDisplay(itemPreco) : 0;
-                                                const subtotal = precoVenda * detalhe.quantidade;
+                                                const precoUnitario = getPrecoUnitarioDetalhe(detalhe, itemPreco);
+                                                const quantidadeExibida = getQuantidadeExibida(detalhe, itemPreco);
+                                                const subtotal = precoUnitario * quantidadeExibida;
                                                 return (
-                                                    <tr key={detalhe.id}>
-                                                        <td className="px-4 py-3 whitespace-normal text-sm text-gray-700">{itemPreco?.descricao || 'Entrada de Material'}</td>
+                                                    <tr key={`detalhe-entrada-${di}-${detalhe.id}`}>
+                                                        <td className="px-4 py-3 whitespace-normal text-sm text-gray-700">{getDisplayDescriptionForPriceItem(itemPreco?.descricao ?? '') || 'Entrada de Material'}</td>
                                                         <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600 text-right">{detalhe.quantidade}</td>
                                                         <td className="px-4 py-3 whitespace-nowrap text-sm text-indigo-800 font-semibold text-right">{formatCurrency(subtotal)}</td>
                                                     </tr>
@@ -1092,9 +1166,9 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                                         </tr>
                                     </thead>
                                     <tbody className="bg-white divide-y divide-amber-50">
-                                        {custosAdicionais.filter(c => !c.isReembolso).map(custo => (
-                                            <tr key={custo.id}>
-                                                <td className="px-4 py-3 whitespace-normal text-sm text-gray-700">{custo.descricao}</td>
+                                        {custosAdicionais.filter(c => !c.isReembolso).map((custo, ci) => (
+                                            <tr key={`custo-${ci}-${custo.id}`}>
+                                                <td className="px-4 py-3 whitespace-normal text-sm text-gray-700">{getDisplayDescriptionForPriceItem(custo.descricao)}</td>
                                                 <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{custo.categoria || '-'}</td>
                                                 <td className="px-4 py-3 whitespace-nowrap text-sm text-amber-800 font-semibold text-right">{formatCurrency(custo.valor)}</td>
                                             </tr>
@@ -1125,9 +1199,9 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                                         </tr>
                                     </thead>
                                     <tbody className="bg-white divide-y divide-emerald-50">
-                                        {custosAdicionais.filter(c => c.isReembolso).map(custo => (
-                                            <tr key={custo.id} className="bg-emerald-50/50">
-                                                <td className="px-4 py-3 whitespace-normal text-sm text-emerald-800 font-medium">{custo.descricao}</td>
+                                        {custosAdicionais.filter(c => c.isReembolso).map((custo, ci) => (
+                                            <tr key={`custo-reemb-${ci}-${custo.id}`} className="bg-emerald-50/50">
+                                                <td className="px-4 py-3 whitespace-normal text-sm text-emerald-800 font-medium">{getDisplayDescriptionForPriceItem(custo.descricao)}</td>
                                                 <td className="px-4 py-3 whitespace-normal text-sm text-gray-500">{custo.motivoReembolso || '-'}</td>
                                                 <td className="px-4 py-3 whitespace-nowrap text-sm text-emerald-700 font-bold text-right">- {formatCurrency(custo.valor)}</td>
                                             </tr>
@@ -1200,55 +1274,97 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                     </CollapsibleSection>
                 </div>
                 
-                {/* Documentos da Fatura */}
+                {/* Arquivos para download - área única e sempre visível */}
                 <div className="mb-8">
-                    <h5 className="text-lg font-semibold text-gray-800 mb-4">Documentos da Fatura</h5>
-                    <div className="space-y-3">
-                        {cobranca.notaFiscalUrl && (
-                            <div className="flex items-center justify-between p-4 bg-blue-50 rounded-md border border-blue-200">
-                                <div className="flex items-center space-x-3">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <h5 className="text-lg font-semibold text-gray-800 mb-2">Arquivos para download</h5>
+                    <p className="text-sm text-gray-600 mb-4">Documentos e relatórios anexados a esta fatura. Também disponíveis no PDF da fatura.</p>
+                    <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50/50 p-4">
+                        {cobranca.notaFiscalUrl ? (
+                            <div className="flex items-center justify-between p-3 bg-white rounded-md border border-gray-200">
+                                <div className="flex items-center gap-3">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                     </svg>
-                                    <div>
-                                        <p className="font-medium text-gray-900">Nota Fiscal</p>
-                                        <p className="text-sm text-gray-500">{cobranca.notaFiscalFileName || 'Arquivo anexado'}</p>
-                                    </div>
+                                    <span className="font-medium text-gray-900">Nota Fiscal</span>
+                                    {cobranca.notaFiscalFileName && <span className="text-sm text-gray-500 truncate max-w-[200px]">{cobranca.notaFiscalFileName}</span>}
                                 </div>
-                                <a
-                                    href={cobranca.notaFiscalUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-blue-600 hover:text-blue-800 font-medium"
-                                >
-                                    Ver/Download
-                                </a>
+                                <a href={cobranca.notaFiscalUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap">Download</a>
+                            </div>
+                        ) : (
+                            <div className="flex items-center justify-between p-3 bg-white rounded-md border border-gray-200 text-gray-500">
+                                <div className="flex items-center gap-3">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                    </svg>
+                                    <span>Nota Fiscal</span>
+                                </div>
+                                <span className="text-sm">Não anexado</span>
                             </div>
                         )}
-                        {documentos.filter(d => d.tipo === 'pedido').map(doc => (
-                            <div key={doc.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-md border">
-                                <div className="flex items-center space-x-3">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        {documentos.filter(d => d.tipo === 'pedido').map((doc, di) => (
+                            <div key={`doc-${di}-${doc.id}`} className="flex items-center justify-between p-3 bg-white rounded-md border border-gray-200">
+                                <div className="flex items-center gap-3 min-w-0">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                     </svg>
-                                    <div>
-                                        <p className="font-medium text-gray-900">Pedido</p>
-                                        <p className="text-sm text-gray-500">{doc.fileName}</p>
-                                    </div>
+                                    <span className="font-medium text-gray-900 truncate">Pedido: {doc.fileName}</span>
                                 </div>
-                                <a
-                                    href={doc.fileUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-blue-600 hover:text-blue-800 font-medium"
-                                >
-                                    Ver/Download
-                                </a>
+                                <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap ml-2">Download</a>
                             </div>
                         ))}
-                        {!cobranca.notaFiscalUrl && documentos.filter(d => d.tipo === 'pedido').length === 0 && (
-                            <p className="text-sm text-gray-500">Nenhum documento anexado ainda.</p>
+                        {cobranca.trackReportDownloadUrl ? (
+                            <div className="flex items-center justify-between p-3 bg-white rounded-md border border-gray-200">
+                                <div className="flex items-center gap-3">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l7.414 7.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                    </svg>
+                                    <span className="font-medium text-gray-900">Relatório de Rastreio (Track Report)</span>
+                                </div>
+                                <a href={cobranca.trackReportDownloadUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap">Download</a>
+                            </div>
+                        ) : (
+                            <div className="flex items-center justify-between p-3 bg-white rounded-md border border-gray-200 text-gray-500">
+                                <div className="flex items-center gap-3">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l7.414 7.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                    </svg>
+                                    <span>Relatório de Rastreio (Track Report)</span>
+                                </div>
+                                <span className="text-sm">Não anexado</span>
+                            </div>
                         )}
+                        {cobranca.orderDetailListagemDownloadUrl ? (
+                            <div className="flex items-center justify-between p-3 bg-white rounded-md border border-gray-200">
+                                <div className="flex items-center gap-3">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l7.414 7.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                    </svg>
+                                    <span className="font-medium text-gray-900">Relatório de Envios (Order Detail – listagem)</span>
+                                </div>
+                                <a href={cobranca.orderDetailListagemDownloadUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap">Download</a>
+                            </div>
+                        ) : (
+                            <div className="flex items-center justify-between p-3 bg-white rounded-md border border-gray-200 text-gray-500">
+                                <div className="flex items-center gap-3">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l7.414 7.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                    </svg>
+                                    <span>Relatório de Envios (Order Detail – listagem)</span>
+                                </div>
+                                <span className="text-sm">Não anexado</span>
+                            </div>
+                        )}
+                        {cobranca.arquivosComplementares?.map((arq, i) => (
+                            <div key={i} className="flex items-center justify-between p-3 bg-white rounded-md border border-gray-200">
+                                <div className="flex items-center gap-3 min-w-0">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                                    </svg>
+                                    <span className="font-medium text-gray-900 truncate">{arq.nome}</span>
+                                </div>
+                                <a href={arq.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap ml-2">Download</a>
+                            </div>
+                        ))}
                     </div>
                     {cobranca.explicacaoNotaFiscal && (
                         <div className="mt-4 p-4 bg-gray-50 rounded-md border">
@@ -1378,38 +1494,17 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100">
-                                {filteredDetalhes.map(detalhe => {
+                                {filteredDetalhes.map((detalhe, detalheIdx) => {
                                     const itemPreco = getPrecoItemInfo(detalhe.tabelaPrecoItemId);
                                     if (!itemPreco) return null;
-
-                                    const isShippingItem = itemPreco.categoria === 'Envios' || itemPreco.categoria === 'Retornos';
-                                    const isDifalItem = itemPreco.categoria === 'Difal' || itemPreco.descricao?.toLowerCase().includes('difal');
-                                    const isTemplate = isTemplateItem(itemPreco);
-                                    const isVariableCost = isTemplate || isShippingItem || isDifalItem;
-
-                                    let precoUnitario: number;
-                                    let quantidadeExibida: number;
-
-                                    if (isDifalItem) {
-                                        quantidadeExibida = 1;
-                                        const DIFAL_MIN_PRICE = 3.00;
-                                        const calculatedPrice = calculatePrecoVenda(itemPreco, detalhe.quantidade);
-                                        precoUnitario = Math.max(calculatedPrice, DIFAL_MIN_PRICE);
-                                    } else if (isVariableCost) {
-                                        quantidadeExibida = 1;
-                                        precoUnitario = calculatePrecoVenda(itemPreco, detalhe.quantidade);
-                                    } else {
-                                        precoUnitario = calculatePrecoVendaForDisplay(itemPreco);
-                                        quantidadeExibida = detalhe.quantidade;
-                                    }
-
+                                    const precoUnitario = getPrecoUnitarioDetalhe(detalhe, itemPreco);
+                                    const quantidadeExibida = getQuantidadeExibida(detalhe, itemPreco);
                                     const subtotal = precoUnitario * quantidadeExibida;
-
                                     return (
-                                        <tr key={detalhe.id}>
+                                        <tr key={`detalhe-print-${detalheIdx}-${detalhe.id}`}>
                                             <td className="px-2 py-2 text-gray-600">{formatDate(detalhe.data)}</td>
                                             <td className="px-2 py-2 text-gray-800">{detalhe.codigoPedido}</td>
-                                            <td className="px-2 py-2 text-gray-700">{`${itemPreco.subcategoria} - ${itemPreco.descricao}`}</td>
+                                            <td className="px-2 py-2 text-gray-700">{`${itemPreco.subcategoria} - ${getDisplayDescriptionForPriceItem(itemPreco.descricao)}`}</td>
                                             <td className="px-2 py-2 text-right text-gray-700">{quantidadeExibida}</td>
                                             <td className="px-2 py-2 text-right font-semibold text-gray-900">{formatCurrency(subtotal)}</td>
                                         </tr>
@@ -1432,9 +1527,9 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-amber-100">
-                                    {custosAdicionais.filter(c => !c.isReembolso).map(custo => (
-                                        <tr key={custo.id}>
-                                            <td className="px-2 py-2 text-gray-800">{custo.descricao}</td>
+                                    {custosAdicionais.filter(c => !c.isReembolso).map((custo, ci) => (
+                                        <tr key={`custo-print-${ci}-${custo.id}`}>
+                                            <td className="px-2 py-2 text-gray-800">{getDisplayDescriptionForPriceItem(custo.descricao)}</td>
                                             <td className="px-2 py-2 text-gray-600">{custo.categoria || '-'}</td>
                                             <td className="px-2 py-2 text-right font-semibold text-amber-800">{formatCurrency(custo.valor)}</td>
                                         </tr>
@@ -1457,20 +1552,21 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-emerald-100">
-                                    {custosAdicionais.filter(c => c.isReembolso).map(custo => (
-                                        <tr key={custo.id}>
-                                            <td className="px-2 py-2 text-emerald-800 font-medium">{custo.descricao}</td>
+                                    {custosAdicionais.filter(c => c.isReembolso).map((custo, ci) => (
+                                        <tr key={`custo-reemb-print-${ci}-${custo.id}`}>
+                                            <td className="px-2 py-2 text-emerald-800 font-medium">{getDisplayDescriptionForPriceItem(custo.descricao)}</td>
                                             <td className="px-2 py-2 text-gray-600">{custo.motivoReembolso || '-'}</td>
                                             <td className="px-2 py-2 text-right font-bold text-emerald-800">- {formatCurrency(custo.valor)}</td>
                                         </tr>
                                     ))}
-                                    {filteredDetalhes.filter(d => d.codigoPedido === 'ENTRADA DE MATERIAL').map(detalhe => {
+                                    {filteredDetalhes.filter(d => d.codigoPedido === 'ENTRADA DE MATERIAL').map((detalhe, di) => {
                                         const itemPreco = getPrecoItemInfo(detalhe.tabelaPrecoItemId);
-                                        const precoVenda = itemPreco ? calculatePrecoVendaForDisplay(itemPreco) : 0;
-                                        const subtotal = precoVenda * detalhe.quantidade;
+                                        const precoUnitario = getPrecoUnitarioDetalhe(detalhe, itemPreco);
+                                        const quantidadeExibida = getQuantidadeExibida(detalhe, itemPreco);
+                                        const subtotal = precoUnitario * quantidadeExibida;
                                         return (
-                                            <tr key={detalhe.id}>
-                                                <td className="px-2 py-2 text-indigo-800 font-medium">{itemPreco?.descricao || 'Entrada de Material'}</td>
+                                            <tr key={`detalhe-entrada-print-${di}-${detalhe.id}`}>
+                                                <td className="px-2 py-2 text-indigo-800 font-medium">{getDisplayDescriptionForPriceItem(itemPreco?.descricao ?? '') || 'Entrada de Material'}</td>
                                                 <td className="px-2 py-2 text-gray-600">Entrada de Material</td>
                                                 <td className="px-2 py-2 text-right font-semibold text-indigo-800">{formatCurrency(subtotal)}</td>
                                             </tr>
@@ -1483,6 +1579,32 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                             </table>
                         </div>
                     </section>
+
+                    {/* Arquivos complementares */}
+                    {(cobranca.trackReportDownloadUrl || cobranca.orderDetailListagemDownloadUrl || (cobranca.arquivosComplementares && cobranca.arquivosComplementares.length > 0)) && (
+                        <section className="space-y-2">
+                            <h3 className="text-md font-semibold text-gray-800">Arquivos complementares</h3>
+                            <div className="text-sm text-gray-700 border border-gray-200 rounded-lg p-3 bg-gray-50">
+                                {cobranca.trackReportDownloadUrl && (
+                                    <p className="mb-1">
+                                        Relatório de Rastreio (Track Report):{' '}
+                                        <a href={cobranca.trackReportDownloadUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">Download</a>
+                                    </p>
+                                )}
+                                {cobranca.orderDetailListagemDownloadUrl && (
+                                    <p className="mb-1">
+                                        Relatório de Envios (Order Detail – listagem):{' '}
+                                        <a href={cobranca.orderDetailListagemDownloadUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">Download</a>
+                                    </p>
+                                )}
+                                {cobranca.arquivosComplementares?.map((arq, i) => (
+                                    <p key={i} className="mb-1">
+                                        {arq.nome}: <a href={arq.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">Download</a>
+                                    </p>
+                                ))}
+                            </div>
+                        </section>
+                    )}
 
                     {/* Notas */}
                     <section className="text-sm text-gray-700">

@@ -204,6 +204,50 @@ const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({ onUpdate, set
             </div>
 
             <div className="bg-white p-6 rounded-lg shadow-md">
+                <h3 className="text-2xl font-bold text-gray-900 mb-4">Modelo do PDF da fatura</h3>
+                <p className="text-sm text-gray-600 mb-4">
+                    Textos opcionais que aparecem no PDF gerado no admin (cabeçalho, rodapé e notas). Deixe em branco para usar o padrão.
+                </p>
+                <form onSubmit={handleSettingsSubmit} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">Cabeçalho extra (opcional)</label>
+                        <textarea
+                            rows={2}
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                            value={currentSettings.invoicePdfHeaderText || ''}
+                            onChange={(e) => setCurrentSettings(p => ({ ...p, invoicePdfHeaderText: e.target.value || undefined }))}
+                            placeholder="Texto exibido abaixo do cabeçalho padrão da fatura"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">Rodapé (opcional)</label>
+                        <textarea
+                            rows={2}
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                            value={currentSettings.invoicePdfFooterText || ''}
+                            onChange={(e) => setCurrentSettings(p => ({ ...p, invoicePdfFooterText: e.target.value || undefined }))}
+                            placeholder="Texto exibido no rodapé do PDF"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">Notas (opcional)</label>
+                        <textarea
+                            rows={4}
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                            value={currentSettings.invoicePdfNotesText || ''}
+                            onChange={(e) => setCurrentSettings(p => ({ ...p, invoicePdfNotesText: e.target.value || undefined }))}
+                            placeholder="Substitui o texto padrão da seção Notas no PDF. Em branco: usa o texto padrão."
+                        />
+                    </div>
+                    <div className="flex justify-end">
+                        <button type="submit" disabled={isSubmitting} className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:bg-blue-300">
+                            {isSubmitting ? 'Salvando...' : 'Salvar modelo'}
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <div className="bg-white p-6 rounded-lg shadow-md">
                 <h3 className="text-2xl font-bold text-gray-900 mb-4">Segurança</h3>
                 <form onSubmit={handlePasswordSubmit} className="space-y-4">
                      <div>

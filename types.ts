@@ -15,7 +15,7 @@ export interface CustoAdicional {
     id: string;
     descricao: string;
     valor: number;
-    categoria?: 'Armazenagem' | 'Maquila/Entrada' | 'Estoque' | 'Logístico' | 'Outro';
+    categoria?: 'Armazenagem' | 'Maquila/Entrada' | 'Estoque' | 'Logístico' | 'Envios' | 'Outro';
     isReembolso?: boolean; // Marca este custo como reembolso (valor será subtraído do total)
     motivoReembolso?: string; // Justificativa do reembolso
 }
@@ -24,7 +24,7 @@ export interface CustoManualPreset {
     id: string;
     descricao: string;
     valor: number;
-    categoria: 'Armazenagem' | 'Maquila/Entrada' | 'Estoque' | 'Logístico' | 'Outro';
+    categoria: 'Armazenagem' | 'Maquila/Entrada' | 'Estoque' | 'Logístico' | 'Envios' | 'Outro';
     ativo?: boolean;
     createdAt?: string;
     updatedAt?: string;
@@ -92,6 +92,16 @@ export interface CobrancaMensal {
     notaFiscalFileName?: string; // Nome original do arquivo
     explicacaoNotaFiscal?: string; // Explicação gerada pelo Gemini
     comprovantesDifal?: ComprovanteDifal[]; // Comprovantes de pagamento DIFAL extraídos de XMLs
+    quantidadeEnviosDisplay?: number; // Quantidade para exibicao (override manual)
+    periodoCobranca?: string; // Periodo de cobranca personalizado (ex: "01/01/2026 a 31/01/2026")
+    /** URL do CSV Track Report (filtrado pelo mês) no Storage para download no PDF */
+    trackReportDownloadUrl?: string;
+    /** URL do CSV Order Detail listagem (sem custos) no Storage para download no PDF */
+    orderDetailListagemDownloadUrl?: string;
+    /** Outros arquivos adicionados na edição da fatura (nome + URL no Storage) */
+    arquivosComplementares?: { nome: string; url: string }[];
+    /** Custo de entrada de material externo quando conhecido (ex.: na fatura como Armazenamento ou definido na edição) */
+    totalEntradaMaterial?: number;
 }
 
 export interface DetalheEnvio {
@@ -102,6 +112,10 @@ export interface DetalheEnvio {
     codigoPedido: string;
     tabelaPrecoItemId: string | null;
     quantidade: number;
+    /** Override de preço unitário; quando definido, subtotal = precoUnitarioManual * quantidade (retrocompatível). */
+    precoUnitarioManual?: number;
+    /** Override do grupo de custo para totais; quando definido, usa este grupo em vez do derivado da tabela de preços. */
+    grupoManual?: 'envio' | 'armazenagem' | 'logistico' | 'custosAdicionais';
     cep?: string; // CEP do destino (coluna M do CSV de custos)
     estado?: string; // Estado/UF do destino (coluna O do CSV de custos)
 }
@@ -136,6 +150,10 @@ export interface GeneralSettings {
     paymentContactName?: string;
     paymentContactEmail?: string;
     paymentContactPhone?: string;
+    // Modelo do PDF da fatura (textos editáveis)
+    invoicePdfHeaderText?: string;
+    invoicePdfFooterText?: string;
+    invoicePdfNotesText?: string;
 }
 
 export interface DocumentoPedido {

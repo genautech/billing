@@ -285,8 +285,8 @@ const ClientManagementView: React.FC<ClientManagementViewProps> = ({ clientes, o
                         </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                        {clientes.map(c => (
-                            <tr key={c.id}>
+                        {clientes.map((c, cIdx) => (
+                            <tr key={`cliente-${cIdx}-${c.id}`}>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{c.nome}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{c.email}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">

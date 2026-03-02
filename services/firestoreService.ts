@@ -714,16 +714,33 @@ export const filterCSVByMonth = (csvContent: string, month: string): string => {
         'Data do Pedido'
     ]);
     
-    if (!dateColumn) {
-        console.warn('Coluna de data não encontrada no CSV, retornando CSV original');
-        return csvContent;
-    }
+    if (!dateColumn) return csvContent;
     
     // Filter by month
     const filteredData = filterDataByMonth(data, dateColumn, month);
     
     // Convert back to CSV string
     return stringifyCSV(filteredData);
+};
+
+/**
+ * Filter Track Report CSV by month and exclude digital/voucher orders (no logistics).
+ * Used for client download so the CSV matches the on-screen report.
+ */
+export const filterCSVByMonthExcludingDigital = (csvContent: string, mesReferencia: string): string => {
+    if (!csvContent || !mesReferencia) return csvContent || '';
+    const data = parseCSV(csvContent);
+    if (data.length === 0) return '';
+
+    const dateColumn = findColumnName(data, [
+        'Data de envio', 'Data de Envio', 'Data do envio', 'Data', 'Date',
+        'Envio Date', 'Data do pedido', 'Data do Pedido'
+    ]);
+    if (!dateColumn) return stringifyCSV(data);
+
+    const byMonth = filterDataByMonth(data, dateColumn, mesReferencia);
+    const excludingDigital = byMonth.filter(row => !isDigitalVoucherOrder(row));
+    return stringifyCSV(excludingDigital);
 };
 
 // --- Helper to count shipments in CSV for a specific month ---
@@ -746,10 +763,7 @@ export const countShipmentsInMonth = (csvContent: string, month: string): number
         'Data do Pedido'
     ]);
     
-    if (!dateColumn) {
-        console.warn('Coluna de data não encontrada no CSV');
-        return 0;
-    }
+    if (!dateColumn) return 0;
     
     // Filter by month and return count
     const filteredData = filterDataByMonth(data, dateColumn, month);
@@ -760,11 +774,64 @@ const stringifyCSV = (data: Record<string, string>[]): string => {
     if (data.length === 0) return "";
     const headers = Object.keys(data[0]);
     const headerRow = headers.join(',');
-    const rows = data.map(row => 
+    const rows = data.map(row =>
         headers.map(header => `"${(row[header] || '').replace(/"/g, '""')}"`).join(',')
     );
     return [headerRow, ...rows].join('\n');
-}
+};
+
+/** Allow-list of column name patterns for client Order Detail (listagem only, no costs). Case-insensitive. */
+const ORDER_DETAIL_LISTAGEM_ALLOWED_PATTERNS = [
+    'data do pedido', 'data', 'date', 'placed at', 'data de envio', 'envio date', 'shipped at',
+    'name', 'nome', 'email', 'customer', 'cliente', 'billing name', 'nome do cliente',
+    'número do pedido', 'numero do pedido', 'order id', 'orderid', 'pedido', 'number', 'numero',
+    'destino', 'tipo de envio', 'rastreio', 'tracking', 'peso de envio', 'pacotes utilizados',
+    'produtos enviados', 'tipo de embalagem', 'material de empacotamento',
+    'cep', 'billing zip', 'shipping zip', 'zip', 'estado', 'uf', 'city', 'cidade', 'address', 'endereço'
+];
+
+/** Block-list: column names containing these (case-insensitive) are excluded from Order Detail listagem. */
+const ORDER_DETAIL_LISTAGEM_COST_BLOCK_PATTERNS = [
+    'custo', 'cost', 'total', 'preço', 'preco', 'price', 'valor', 'frete', 'subtotal',
+    'item total', 'item price', 'shipping cost', 'custo de envio', 'tax', 'imposto', 'discount', 'desconto'
+];
+
+/**
+ * Returns CSV with only listagem columns (date, client name, shipment data, CEP). No cost columns.
+ * Used for client-facing Order Detail download and for Storage upload.
+ */
+export const orderDetailToClientListagemCSV = (csvContent: string, mesReferencia?: string): string => {
+    if (!csvContent || !csvContent.trim()) return '';
+    const data = parseCSV(csvContent);
+    if (data.length === 0) return '';
+
+    const dateColumn = findColumnName(data, [
+        'Data do pedido', 'Data do Pedido', 'Data', 'Date', 'Placed at', 'Data de envio', 'Envio Date'
+    ]);
+    let rows = data;
+    if (mesReferencia && dateColumn) {
+        rows = filterDataByMonth(data, dateColumn, mesReferencia);
+    }
+
+    const allHeaders = Object.keys(data[0]);
+    let allowedHeaders = allHeaders.filter(h => {
+        const lower = h.toLowerCase().trim();
+        return ORDER_DETAIL_LISTAGEM_ALLOWED_PATTERNS.some(p => lower === p || lower.includes(p));
+    });
+    // Exclude any cost-related columns even if they matched the allow-list
+    allowedHeaders = allowedHeaders.filter(h => {
+        const lower = h.toLowerCase().trim();
+        return !ORDER_DETAIL_LISTAGEM_COST_BLOCK_PATTERNS.some(p => lower.includes(p));
+    });
+    if (allowedHeaders.length === 0) return stringifyCSV(rows);
+
+    const filtered = rows.map(row => {
+        const out: Record<string, string> = {};
+        allowedHeaders.forEach(header => { out[header] = row[header] ?? ''; });
+        return out;
+    });
+    return stringifyCSV(filtered);
+};
 
 // --- Clientes ---
 export const getClientes = async (): Promise<Cliente[]> => {
@@ -1307,12 +1374,25 @@ export const getCustosAdicionaisByCobrancaId = async (cobrancaId: string): Promi
 
 // --- Custos manuais por cliente (presets) ---
 export const getCustosManuaisByCliente = async (clienteId: string): Promise<CustoManualPreset[]> => {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/a9ef296b-8240-4113-a518-0e1e56e2ff45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'firestoreService.ts:getCustosManuaisByCliente:entry',message:'Chamando getCustosManuaisByCliente',data:{clienteId,path:`clientes/${clienteId}/custosManuais`},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
+    // #endregion
     if (!clienteId) return [];
     const custosCol = clientesCol.doc(clienteId).collection('custosManuais');
-    const snapshot = await custosCol.get();
-    return snapshot.docs
-        .map(doc => ({ ...doc.data(), id: doc.id } as CustoManualPreset))
-        .filter(c => c.ativo !== false);
+    try {
+        const snapshot = await custosCol.get();
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/a9ef296b-8240-4113-a518-0e1e56e2ff45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'firestoreService.ts:getCustosManuaisByCliente:success',message:'Query custosManuais OK',data:{count:snapshot.docs.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{}); 
+        // #endregion
+        return snapshot.docs
+            .map(doc => ({ ...doc.data(), id: doc.id } as CustoManualPreset))
+            .filter(c => c.ativo !== false);
+    } catch (error) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/a9ef296b-8240-4113-a518-0e1e56e2ff45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'firestoreService.ts:getCustosManuaisByCliente:error',message:'Erro ao buscar custosManuais',data:{error:String(error),clienteId,path:`clientes/${clienteId}/custosManuais`},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
+        // #endregion
+        throw error;
+    }
 };
 
 export const addCustoManualPreset = async (clienteId: string, data: Omit<CustoManualPreset, 'id' | 'createdAt' | 'updatedAt'>): Promise<CustoManualPreset> => {
@@ -1440,20 +1520,79 @@ export const getShareableUrl = (clienteId: string, cobrancaId: string) => {
     return `${baseUrl}/#share-${clienteId}-${cobrancaId}`;
 }
 
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** Rounds invoice and related monetary values to 2 decimal places for persistence. */
+function roundInvoiceTo2Decimals(
+    cobranca: CobrancaMensal,
+    detalhes: DetalheEnvio[],
+    custosAdicionais: CustoAdicional[]
+): { cobranca: CobrancaMensal; detalhes: DetalheEnvio[]; custosAdicionais: CustoAdicional[] } {
+    const c: CobrancaMensal = {
+        ...cobranca,
+        totalEnvio: round2(cobranca.totalEnvio),
+        totalArmazenagem: round2(cobranca.totalArmazenagem),
+        totalCustosLogisticos: round2(cobranca.totalCustosLogisticos),
+        valorTotal: round2(cobranca.valorTotal),
+        custoTotal: round2(cobranca.custoTotal),
+        ...(cobranca.totalCustosAdicionais != null && { totalCustosAdicionais: round2(cobranca.totalCustosAdicionais) }),
+        ...(cobranca.totalCustosExtras != null && { totalCustosExtras: round2(cobranca.totalCustosExtras) }),
+        ...(cobranca.totalEntradaMaterial != null && { totalEntradaMaterial: round2(cobranca.totalEntradaMaterial) }),
+    };
+    const d: DetalheEnvio[] = detalhes.map(det => ({
+        ...det,
+        ...(det.precoUnitarioManual != null && { precoUnitarioManual: round2(det.precoUnitarioManual) }),
+    }));
+    const custos: CustoAdicional[] = custosAdicionais.map(custo => ({
+        ...custo,
+        valor: round2(custo.valor),
+    }));
+    return { cobranca: c, detalhes: d, custosAdicionais: custos };
+}
+
+/** Rounds a single cobrança's monetary fields to 2 decimals (for display when loading from Firestore). */
+export function roundCobrancaForDisplay(cobranca: CobrancaMensal): CobrancaMensal {
+    return {
+        ...cobranca,
+        totalEnvio: round2(cobranca.totalEnvio),
+        totalArmazenagem: round2(cobranca.totalArmazenagem),
+        totalCustosLogisticos: round2(cobranca.totalCustosLogisticos),
+        valorTotal: round2(cobranca.valorTotal),
+        custoTotal: round2(cobranca.custoTotal),
+        ...(cobranca.totalCustosAdicionais != null && { totalCustosAdicionais: round2(cobranca.totalCustosAdicionais) }),
+        ...(cobranca.totalCustosExtras != null && { totalCustosExtras: round2(cobranca.totalCustosExtras) }),
+        ...(cobranca.totalEntradaMaterial != null && { totalEntradaMaterial: round2(cobranca.totalEntradaMaterial) }),
+    };
+}
+
+/** Rounds detalhes' precoUnitarioManual to 2 decimals (for display when loading). */
+export function roundDetalhesForDisplay(detalhes: DetalheEnvio[]): DetalheEnvio[] {
+    return detalhes.map(det => ({
+        ...det,
+        ...(det.precoUnitarioManual != null && { precoUnitarioManual: round2(det.precoUnitarioManual) }),
+    }));
+}
+
+/** Rounds custos adicionais' valor to 2 decimals (for display when loading). */
+export function roundCustosAdicionaisForDisplay(custos: CustoAdicional[]): CustoAdicional[] {
+    return custos.map(c => ({ ...c, valor: round2(c.valor) }));
+}
+
 export const salvarCobrancaProcessada = async (cobranca: CobrancaMensal, detalhes: DetalheEnvio[], custosAdicionais: CustoAdicional[], trackReportContent: string, orderDetailContent: string): Promise<CobrancaMensal> => {
+    const { cobranca: c, detalhes: d, custosAdicionais: custos } = roundInvoiceTo2Decimals(cobranca, detalhes, custosAdicionais);
+
     const batch = db.batch();
-    
     const newCobrancaRef = cobrancasCol.doc();
-    const finalCobranca = { ...cobranca, id: newCobrancaRef.id };
-    
-    const urlCompartilhamento = getShareableUrl(cobranca.clienteId, newCobrancaRef.id);
+    const finalCobranca = { ...c, id: newCobrancaRef.id };
+
+    const urlCompartilhamento = getShareableUrl(c.clienteId, newCobrancaRef.id);
     
     // #region agent log
-    const sampleDetailIds = detalhes.slice(0, 10).map(d => ({ tabelaPrecoItemId: d.tabelaPrecoItemId, pedido: d.codigoPedido, quantidade: d.quantidade }));
-    fetch('http://127.0.0.1:7242/ingest/a9ef296b-8240-4113-a518-0e1e56e2ff45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'firestoreService.ts:salvarCobrancaProcessada',message:'Saving invoice with detail IDs',data:{clienteId:cobranca.clienteId,cobrancaId:newCobrancaRef.id,totalDetalhes:detalhes.length,sampleDetailIds},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'SAVE-IDS'})}).catch(()=>{});
+    const sampleDetailIds = d.slice(0, 10).map(det => ({ tabelaPrecoItemId: det.tabelaPrecoItemId, pedido: det.codigoPedido, quantidade: det.quantidade }));
+    fetch('http://127.0.0.1:7242/ingest/a9ef296b-8240-4113-a518-0e1e56e2ff45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'firestoreService.ts:salvarCobrancaProcessada',message:'Saving invoice with detail IDs',data:{clienteId:c.clienteId,cobrancaId:newCobrancaRef.id,totalDetalhes:d.length,sampleDetailIds},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'SAVE-IDS'})}).catch(()=>{});
     // #endregion
-    
-    const { id: _cobrancaId, ...cobrancaToSave } = cobranca;
+
+    const { id: _cobrancaId, ...cobrancaToSave } = c;
     batch.set(newCobrancaRef, {
         ...cobrancaToSave,
         urlCompartilhamento,
@@ -1461,13 +1600,13 @@ export const salvarCobrancaProcessada = async (cobranca: CobrancaMensal, detalhe
         relatorioCustosCSV: orderDetailContent
     });
 
-    detalhes.forEach(detalhe => {
+    d.forEach(detalhe => {
         const newDetalheRef = newCobrancaRef.collection('detalhesEnvio').doc();
         const { id: _detalheId, ...detalheToSave } = detalhe;
         batch.set(newDetalheRef, { ...detalheToSave, cobrancaId: newCobrancaRef.id });
     });
-    
-    custosAdicionais.forEach(custo => {
+
+    custos.forEach(custo => {
         const newCustoRef = newCobrancaRef.collection('custosAdicionais').doc();
         const { id: _custoId, ...custoToSave } = custo;
         batch.set(newCustoRef, custoToSave);
@@ -1478,40 +1617,40 @@ export const salvarCobrancaProcessada = async (cobranca: CobrancaMensal, detalhe
 };
 
 export const salvarCobrancaEditada = async (cobranca: CobrancaMensal, detalhes: DetalheEnvio[], custosAdicionais: CustoAdicional[]) => {
+    const { cobranca: c, detalhes: d, custosAdicionais: custos } = roundInvoiceTo2Decimals(cobranca, detalhes, custosAdicionais);
+
     const batch = db.batch();
-    
-    const cobrancaRef = cobrancasCol.doc(cobranca.id);
-    const urlCompartilhamento = getShareableUrl(cobranca.clienteId, cobranca.id);
-    
-    const { id: _cobrancaId, ...cobrancaToUpdate } = cobranca;
+    const cobrancaRef = cobrancasCol.doc(c.id);
+    const urlCompartilhamento = getShareableUrl(c.clienteId, c.id);
+
+    const { id: _cobrancaId, ...cobrancaToUpdate } = c;
     batch.update(cobrancaRef, { ...cobrancaToUpdate, urlCompartilhamento });
-    
+
     // Manage 'detalhesEnvio' subcollection
-    const existingDetalhes = await getDetalhesByCobrancaId(cobranca.id);
-    existingDetalhes.forEach(d => {
-        const detalheRef = cobrancaRef.collection('detalhesEnvio').doc(d.id);
+    const existingDetalhes = await getDetalhesByCobrancaId(c.id);
+    existingDetalhes.forEach(det => {
+        const detalheRef = cobrancaRef.collection('detalhesEnvio').doc(det.id);
         batch.delete(detalheRef);
     });
 
-    detalhes.forEach(detalhe => {
+    d.forEach(detalhe => {
         const newDetalheRef = cobrancaRef.collection('detalhesEnvio').doc();
         const { id: _detalheId, ...detalheToSave } = detalhe;
-        batch.set(newDetalheRef, { ...detalheToSave, cobrancaId: cobranca.id });
+        batch.set(newDetalheRef, { ...detalheToSave, cobrancaId: c.id });
     });
-    
+
     // Manage 'custosAdicionais' subcollection
-    const existingCustosAdicionais = await getCustosAdicionaisByCobrancaId(cobranca.id);
-    existingCustosAdicionais.forEach(c => {
-        const custoRef = cobrancaRef.collection('custosAdicionais').doc(c.id);
+    const existingCustosAdicionais = await getCustosAdicionaisByCobrancaId(c.id);
+    existingCustosAdicionais.forEach(custo => {
+        const custoRef = cobrancaRef.collection('custosAdicionais').doc(custo.id);
         batch.delete(custoRef);
     });
 
-    custosAdicionais.forEach(custo => {
+    custos.forEach(custo => {
         const newCustoRef = cobrancaRef.collection('custosAdicionais').doc();
         const { id: _custoId, ...custoToSave } = custo;
         batch.set(newCustoRef, custoToSave);
     });
-
 
     await batch.commit();
 };
@@ -1523,6 +1662,49 @@ export const getCostCategoryGroup = (category: string): 'envio' | 'armazenagem' 
     if (envioCats.some(c => catLower.includes(c))) return 'envio';
     if (catLower.includes('armazenamento') || catLower.includes('armazenagem')) return 'armazenagem';
     return 'logistico';
+};
+
+/** Nome padronizado do custo "Recebimentos - Recebimento de ítem externo" em tabelas e faturas. */
+export const NOME_PADRAO_RECEBIMENTO_ITENS_EXTERNOS = 'Recebimentos - de itens externos';
+
+function isRecebimentoItensExternosDesc(desc: string): boolean {
+    const d = (desc ?? '').toLowerCase();
+    return d.includes('recebimento') && (d.includes('ítem externo') || d.includes('item externo') || d.includes('itens externos') || d.includes('material externo'));
+}
+
+/** Item de recebimento/entrada de itens externos: tratado como Custos Adicionais (não Armazenagem). */
+export const isRecebimentoItensExternos = (item: TabelaPrecoItem): boolean => {
+    if (!item) return false;
+    return isRecebimentoItensExternosDesc(item.descricao ?? '');
+};
+
+/** Retorna a descrição padronizada para exibição (ex.: "Recebimentos - de itens externos") quando aplicável. */
+export const getDisplayDescriptionForPriceItem = (descricao: string): string => {
+    if (isRecebimentoItensExternosDesc(descricao ?? '')) return NOME_PADRAO_RECEBIMENTO_ITENS_EXTERNOS;
+    return descricao ?? '';
+};
+
+/**
+ * Itens recebidos e entradas de itens externos (incl. "Recebimentos - de itens externos")
+ * são tratados como Custos Adicionais na fatura e nos totais.
+ */
+export const isItensRecebidosOuEntrada = (item: TabelaPrecoItem): boolean => {
+    if (!item) return false;
+    if (isRecebimentoItensExternos(item)) return true;
+    const desc = (item.descricao ?? '').toLowerCase();
+    const sub = (item.subcategoria ?? '').toLowerCase();
+    const cat = (item.categoria ?? '').toLowerCase();
+    if (cat.includes('retornos') && (desc.includes('itens recebidos') || desc.includes('entrada'))) return true;
+    if (desc.includes('itens recebidos') || sub.includes('itens recebidos')) return true;
+    if (cat.includes('maquila') && (desc.includes('entrada') || sub.includes('entrada'))) return true;
+    if (desc.includes('entrada de material') || desc.includes('entrada de itens')) return true;
+    return false;
+};
+
+export const getCostCategoryGroupForItem = (item: TabelaPrecoItem): 'envio' | 'armazenagem' | 'logistico' | 'custosAdicionais' => {
+    if (!item) return 'logistico';
+    if (isItensRecebidosOuEntrada(item)) return 'custosAdicionais';
+    return getCostCategoryGroup(item.categoria);
 };
 
 // Helper function to identify if an item is a template (dynamic cost)
@@ -1543,6 +1725,141 @@ export const isTemplateItem = (item: TabelaPrecoItem): boolean => {
     
     return isDynamicIndicator && (isShipping || isDifal || hasTemplateInDescription);
 };
+
+/**
+ * Creates a finder for price table items by ID with fallback for unknown/obsolete IDs.
+ * Used so invoice display and dashboard use the same resolution (e.g. old invoices with removed IDs).
+ * Call the returned function with (tabelaPrecoItemId, { codigoPedido?, quantidade? }).
+ */
+export function createFindItemPreco(tabelaPrecos: TabelaPrecoItem[]): (
+    tabelaPrecoItemId: string,
+    context?: { codigoPedido?: string; quantidade?: number }
+) => TabelaPrecoItem | undefined {
+    const byId = new Map<string, TabelaPrecoItem>();
+    let difalItem: TabelaPrecoItem | undefined;
+    tabelaPrecos.forEach(item => {
+        byId.set(item.id, item);
+        if (item.descricao?.toLowerCase().includes('difal') ||
+            (item.categoria === 'Custos Internos' && item.descricao?.toLowerCase().includes('difal'))) {
+            difalItem = item;
+        }
+    });
+    const unknownIdToItem = new Map<string, TabelaPrecoItem>();
+    return (tabelaPrecoItemId: string, context?: { codigoPedido?: string; quantidade?: number }): TabelaPrecoItem | undefined => {
+        const byIdResult = byId.get(tabelaPrecoItemId);
+        if (byIdResult) return byIdResult;
+        const cached = unknownIdToItem.get(tabelaPrecoItemId);
+        if (cached) return cached;
+        if (context?.codigoPedido) {
+            const isStorageOrder = context.codigoPedido.toUpperCase().includes('ARMAZENAGEM');
+            if (!isStorageOrder && context.quantidade !== undefined && context.quantidade <= 3 && difalItem) {
+                unknownIdToItem.set(tabelaPrecoItemId, difalItem);
+                return difalItem;
+            }
+        }
+        return undefined;
+    };
+}
+
+const DIFAL_MIN_PRICE = 3.0;
+
+/** Effective unit price for a detalhe: manual override or calculated from table. Used by recalculateCobrancaTotalsFromDetalhes. */
+function getPrecoUnitarioDetalheForRecalc(detalhe: DetalheEnvio, item: TabelaPrecoItem): number {
+    if (detalhe.precoUnitarioManual != null) return Number(detalhe.precoUnitarioManual);
+    const isShippingItem = item.categoria === 'Envios' || item.categoria === 'Retornos';
+    const isDifalItem = item.categoria === 'Difal' || item.descricao?.toLowerCase().includes('difal');
+    const isTemplate = isTemplateItem(item);
+    if (isDifalItem) return Math.max(calculatePrecoVenda(item, detalhe.quantidade), DIFAL_MIN_PRICE);
+    if (isTemplate || isShippingItem || isDifalItem) return calculatePrecoVenda(item, detalhe.quantidade);
+    return calculatePrecoVendaForDisplay(item);
+}
+
+/** Effective quantity for totalling: 1 for shipping/difal (non-template), else detalhe.quantidade. */
+function getQuantidadeExibidaForRecalc(detalhe: DetalheEnvio, item: TabelaPrecoItem): number {
+    const isShippingItem = item.categoria === 'Envios' || item.categoria === 'Retornos';
+    const isTemplate = isTemplateItem(item);
+    const isDifalItem = item.categoria === 'Difal' || item.descricao?.toLowerCase().includes('difal');
+    if (isDifalItem || (isShippingItem && !isTemplate)) return 1;
+    return detalhe.quantidade;
+}
+
+/**
+ * Recalculates cobrança totals from detalhes + custosAdicionais + tabelaPrecos (pure, no Firestore).
+ * Use for backfill or when reclassifying line items (e.g. entrada itens externos -> custos adicionais).
+ */
+export function recalculateCobrancaTotalsFromDetalhes(
+    detalhes: DetalheEnvio[],
+    custosAdicionais: CustoAdicional[],
+    tabelaPrecos: TabelaPrecoItem[],
+    existingTotalCustosExtras: number = 0,
+    existingTotalEntradaMaterial?: number
+): {
+    totalEnvio: number;
+    totalArmazenagem: number;
+    totalCustosLogisticos: number;
+    totalCustosAdicionais: number;
+    totalCustosExtras: number;
+    valorTotal: number;
+    custoTotal: number;
+    quantidadeEnvios: number;
+} {
+    let totalEnvio = 0;
+    let totalArmazenagem = 0;
+    let totalCustosLogisticos = 0;
+    let totalCustosAdicionaisFromLineItems = 0;
+    let custoTotal = 0;
+    let quantidadeEnvios = 0;
+
+    detalhes.forEach(d => {
+        if (!d.tabelaPrecoItemId) return;
+        const item = tabelaPrecos.find(c => c.id === d.tabelaPrecoItemId);
+        if (!item) return;
+
+        const group = d.grupoManual ?? getCostCategoryGroupForItem(item);
+        const isTemplate = isTemplateItem(item);
+        const isVariableCost = isTemplate || item.categoria === 'Envios' || item.categoria === 'Retornos' || item.categoria === 'Difal' || item.descricao?.toLowerCase().includes('difal');
+
+        const precoUnitario = getPrecoUnitarioDetalheForRecalc(d, item);
+        const quantidadeUsada = getQuantidadeExibidaForRecalc(d, item);
+        const subtotalVenda = precoUnitario * quantidadeUsada;
+
+        const isPassThrough = isTemplateItem(item);
+        const subtotalCusto = isPassThrough ? d.quantidade : (isVariableCost ? d.quantidade : (item.custoUnitario ?? 0) * d.quantidade);
+        custoTotal += subtotalCusto;
+
+        if (group === 'custosAdicionais') {
+            totalCustosAdicionaisFromLineItems += subtotalVenda;
+        } else if (group === 'armazenagem') {
+            totalArmazenagem += subtotalVenda;
+        } else if (group === 'envio') {
+            totalEnvio += subtotalVenda;
+            quantidadeEnvios++;
+        } else {
+            totalCustosLogisticos += subtotalVenda;
+        }
+    });
+
+    const custosRegulares = custosAdicionais.filter(c => !c.isReembolso);
+    const reembolsos = custosAdicionais.filter(c => c.isReembolso);
+    const totalCustosAdicionaisRegulares = custosRegulares.reduce((sum, c) => sum + c.valor, 0);
+    const totalReembolsos = reembolsos.reduce((sum, c) => sum + c.valor, 0);
+    const totalCustosAdicionais = totalCustosAdicionaisFromLineItems + totalCustosAdicionaisRegulares - totalReembolsos;
+    const totalCustosExtras = existingTotalCustosExtras;
+    const totalEntradaMaterial = existingTotalEntradaMaterial ?? 0;
+    const valorTotal = totalEnvio + totalArmazenagem + totalCustosLogisticos + totalCustosExtras + totalCustosAdicionais + totalEntradaMaterial;
+    custoTotal += totalCustosAdicionaisRegulares + totalCustosExtras - totalReembolsos;
+
+    return {
+        totalEnvio,
+        totalArmazenagem,
+        totalCustosLogisticos,
+        totalCustosAdicionais,
+        totalCustosExtras,
+        valorTotal,
+        custoTotal,
+        quantidadeEnvios
+    };
+}
 
 // Helper function to calculate sale price based on cost and margin
 // Always recalculates to ensure margin changes are reflected in invoices
@@ -3092,7 +3409,7 @@ export const processarFatura = async (
     }
     // --- END: Process Storage and Manual Costs ---
     
-    let totalEnvio = 0, totalArmazenagem = 0, totalCustosLogisticos = 0, custoTotal = 0;
+    let totalEnvio = 0, totalArmazenagem = 0, totalCustosLogisticos = 0, totalCustosAdicionaisFromLineItems = 0, custoTotal = 0;
     let totalDifal = 0, quantidadeDifal = 0;
     let quantidadeEnvios = 0; // Count of shipments charged
     let itemsFound = 0;
@@ -3134,8 +3451,10 @@ export const processarFatura = async (
                 totalDifal += subtotalVenda;
                 quantidadeDifal++;
             } else {
-            const group = getCostCategoryGroup(item.categoria);
-            if (group === 'armazenagem') {
+            const group = getCostCategoryGroupForItem(item);
+            if (group === 'custosAdicionais') {
+                totalCustosAdicionaisFromLineItems += subtotalVenda;
+            } else if (group === 'armazenagem') {
                 totalArmazenagem += subtotalVenda;
             } else if (group === 'envio') {
                 totalEnvio += subtotalVenda;
@@ -3163,8 +3482,8 @@ export const processarFatura = async (
         confirmadaPeloCliente: false,
         totalEnvio, quantidadeEnvios, totalArmazenagem, totalCustosLogisticos, custoTotal,
         totalCustosExtras: 0,
-        totalCustosAdicionais: 0,
-        valorTotal: totalArmazenagem + totalEnvio + totalCustosLogisticos,
+        totalCustosAdicionais: totalCustosAdicionaisFromLineItems,
+        valorTotal: totalArmazenagem + totalEnvio + totalCustosLogisticos + totalCustosAdicionaisFromLineItems,
         urlPlanilhaConferencia: '',
     };
     
@@ -3796,14 +4115,84 @@ export const deleteFileFromStorage = async (url: string): Promise<void> => {
     }
 };
 
+/** Upload string content (e.g. CSV) to Storage and return download URL. */
+export const uploadStringToStorage = async (
+    content: string,
+    path: string,
+    contentType: string = 'text/csv;charset=utf-8'
+): Promise<string> => {
+    const storageRef = storage.ref();
+    const fileRef = storageRef.child(path);
+    const blob = new Blob([content], { type: contentType });
+    const snapshot = await fileRef.put(blob);
+    return await snapshot.ref.getDownloadURL();
+};
+
+/**
+ * Ensure download URLs exist for a cobrança: upload Track Report and Order Detail listagem to Storage if CSV content exists and URL is missing.
+ * Returns URLs to set (caller should merge into cobrança and persist).
+ */
+export const ensureCobrancaDownloadUrls = async (cobranca: CobrancaMensal): Promise<Partial<Pick<CobrancaMensal, 'trackReportDownloadUrl' | 'orderDetailListagemDownloadUrl'>>> => {
+    const updates: Partial<Pick<CobrancaMensal, 'trackReportDownloadUrl' | 'orderDetailListagemDownloadUrl'>> = {};
+    const basePath = `cobrancas/${cobranca.id}`;
+    const safeMonth = (cobranca.mesReferencia || '').replace(/[^a-z0-9]/gi, '-');
+
+    if (cobranca.relatorioRastreioCSV && cobranca.mesReferencia && !cobranca.trackReportDownloadUrl) {
+        const csv = filterCSVByMonth(cobranca.relatorioRastreioCSV, cobranca.mesReferencia);
+        if (csv.trim()) {
+            const path = `${basePath}/track-report-${safeMonth}.csv`;
+            updates.trackReportDownloadUrl = await uploadStringToStorage(csv, path);
+        }
+    }
+    if (cobranca.relatorioCustosCSV && cobranca.mesReferencia && !cobranca.orderDetailListagemDownloadUrl) {
+        const csv = orderDetailToClientListagemCSV(cobranca.relatorioCustosCSV, cobranca.mesReferencia);
+        if (csv.trim()) {
+            const path = `${basePath}/order-detail-listagem-${safeMonth}.csv`;
+            updates.orderDetailListagemDownloadUrl = await uploadStringToStorage(csv, path);
+        }
+    }
+    return updates;
+};
+
+/**
+ * Backfill: for all cobranças that have CSV content but no download URLs, upload to Storage and update Firestore.
+ * Returns the number of cobranças updated. Run once to make existing invoices (e.g. Jan/Feb PRIO) have links available.
+ */
+export const backfillCobrancaDownloadUrls = async (): Promise<number> => {
+    const snapshot = await cobrancasCol.get();
+    let updated = 0;
+    for (const doc of snapshot.docs) {
+        const cobranca = { id: doc.id, ...doc.data() } as CobrancaMensal;
+        const urlUpdates = await ensureCobrancaDownloadUrls(cobranca);
+        if (Object.keys(urlUpdates).length > 0) {
+            await doc.ref.update(urlUpdates);
+            updated += 1;
+        }
+    }
+    return updated;
+};
+
 // --- Documentos Pedidos Functions ---
 
 export const getDocumentosByCobrancaId = async (cobrancaId: string): Promise<DocumentoPedido[]> => {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/a9ef296b-8240-4113-a518-0e1e56e2ff45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'firestoreService.ts:getDocumentosByCobrancaId:entry',message:'Chamando getDocumentosByCobrancaId',data:{cobrancaId,collection:'documentosPedidos'},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+    // #endregion
     const q = documentosCol.where('cobrancaId', '==', cobrancaId);
-    const snapshot = await q.get();
-    const docs = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as DocumentoPedido));
-    // Sort by uploadDate descending manually
-    return docs.sort((a, b) => new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime());
+    try {
+        const snapshot = await q.get();
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/a9ef296b-8240-4113-a518-0e1e56e2ff45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'firestoreService.ts:getDocumentosByCobrancaId:success',message:'Query documentosPedidos OK',data:{count:snapshot.docs.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+        // #endregion
+        const docs = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as DocumentoPedido));
+        // Sort by uploadDate descending manually
+        return docs.sort((a, b) => new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime());
+    } catch (error) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/a9ef296b-8240-4113-a518-0e1e56e2ff45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'firestoreService.ts:getDocumentosByCobrancaId:error',message:'Erro ao buscar documentosPedidos',data:{error:String(error),cobrancaId,collection:'documentosPedidos'},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+        // #endregion
+        throw error;
+    }
 };
 
 export const getDocumentosByClienteAndMonth = async (clienteId: string, mesReferencia: string): Promise<DocumentoPedido[]> => {

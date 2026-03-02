@@ -29,7 +29,7 @@ interface DashboardViewProps {
 }
 
 const MonthlyProfitReport: React.FC<{ cobrancas: CobrancaMensal[], clientes: Cliente[] }> = ({ cobrancas, clientes }) => {
-    const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+    const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
 
     const reportData = useMemo(() => {
         if (cobrancas.length === 0) return null;
@@ -103,7 +103,7 @@ const MonthlyProfitReport: React.FC<{ cobrancas: CobrancaMensal[], clientes: Cli
 
 
 const DashboardView: React.FC<DashboardViewProps> = ({ cobrancas, clientes }) => {
-    const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+    const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
     
     const stats = useMemo(() => {
         const totalFaturado = cobrancas.reduce((sum, c) => sum + c.valorTotal, 0);

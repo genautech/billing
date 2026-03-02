@@ -7,8 +7,11 @@ import {
     calculatePrecoVendaForDisplay,
     isTemplateItem,
     getCostCategoryGroup,
+    getCostCategoryGroupForItem,
+    getDisplayDescriptionForPriceItem,
     addComprovantesDifalToCobranca,
     getCustosManuaisByCliente,
+    getTabelaPrecos,
     validateMultipleOrderDetailCSVs
 } from '../../../services/firestoreService';
 import type { TabelaPrecoItem, CobrancaMensal, DetalheEnvio, Cliente, AIAnalysis, CustoAdicional, CustoManualPreset, ComprovanteDifal, InvoiceSummary, CustoAdicionalResumo } from '../../../types';
@@ -30,7 +33,7 @@ const InvoiceGenerationView: React.FC<InvoiceGenerationViewProps> = ({ clientes,
     // #region agent log
     fetch('http://127.0.0.1:7242/ingest/a9ef296b-8240-4113-a518-0e1e56e2ff45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'InvoiceGenerationView.tsx:init',message:'Componente inicializado',data:{clientesCount:clientes.length,tabelaPrecosCount:tabelaPrecos.length,primeiroCliente:clientes[0]?.id||'NENHUM'},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
     // #endregion
-    const manualCostCategories: NonNullable<CustoAdicional['categoria']>[] = ['Armazenagem', 'Maquila/Entrada', 'Estoque', 'Logístico', 'Outro'];
+    const manualCostCategories: NonNullable<CustoAdicional['categoria']>[] = ['Armazenagem', 'Maquila/Entrada', 'Estoque', 'Logístico', 'Envios', 'Outro'];
     const [clientId, setClientId] = useState<string>(clientes[0]?.id || '');
     const [month, setMonth] = useState<string>('Outubro/2025');
     const [storageStartDate, setStorageStartDate] = useState<string>('');
@@ -78,6 +81,27 @@ const InvoiceGenerationView: React.FC<InvoiceGenerationViewProps> = ({ clientes,
 
     const [isMonthPickerOpen, setIsMonthPickerOpen] = useState(false);
     const monthPickerRef = useRef<HTMLDivElement>(null);
+
+    // Client-specific price table for draft totals and dropdowns (fallback to global when not loaded)
+    const [tabelaPrecosCliente, setTabelaPrecosCliente] = useState<TabelaPrecoItem[]>([]);
+    useEffect(() => {
+        if (!clientId) {
+            setTabelaPrecosCliente([]);
+            return;
+        }
+        let cancelled = false;
+        getTabelaPrecos(clientId).then((data) => {
+            if (!cancelled) setTabelaPrecosCliente(data);
+        }).catch(() => {
+            if (!cancelled) setTabelaPrecosCliente([]);
+        });
+        return () => { cancelled = true; };
+    }, [clientId]);
+
+    // Use client table when loaded for this client; otherwise global (for draft UI and dropdowns)
+    const effectiveTabelaPrecos = useMemo(() =>
+        clientId && tabelaPrecosCliente.length > 0 ? tabelaPrecosCliente : tabelaPrecos
+    , [clientId, tabelaPrecosCliente, tabelaPrecos]);
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -148,16 +172,16 @@ const InvoiceGenerationView: React.FC<InvoiceGenerationViewProps> = ({ clientes,
         loadPresets();
     }, [clientId, addToast]);
     
-    const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+    const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
 
     // Filter out template items for display (but keep them in calculations)
     const filteredDraftDetalhes = useMemo(() => {
         return draftDetalhes.filter(detalhe => {
-            const itemPreco = tabelaPrecos.find(c => c.id === detalhe.tabelaPrecoItemId);
+            const itemPreco = effectiveTabelaPrecos.find(c => c.id === detalhe.tabelaPrecoItemId);
             if (!itemPreco) return true; // Keep items without price table match
             return !isTemplateItem(itemPreco); // Filter out templates
         });
-    }, [draftDetalhes, tabelaPrecos]);
+    }, [draftDetalhes, effectiveTabelaPrecos]);
 
     // Group draft details by order code and then by category (using filtered details)
     const groupedByOrder = useMemo(() => {
@@ -165,7 +189,7 @@ const InvoiceGenerationView: React.FC<InvoiceGenerationViewProps> = ({ clientes,
         
         filteredDraftDetalhes.forEach(detalhe => {
             const orderCode = detalhe.codigoPedido || 'Sem Pedido';
-            const itemPreco = tabelaPrecos.find(c => c.id === detalhe.tabelaPrecoItemId);
+            const itemPreco = effectiveTabelaPrecos.find(c => c.id === detalhe.tabelaPrecoItemId);
             const category = itemPreco?.categoria || 'Outros';
             
             if (!grouped[orderCode]) {
@@ -178,14 +202,14 @@ const InvoiceGenerationView: React.FC<InvoiceGenerationViewProps> = ({ clientes,
         });
         
         return grouped;
-    }, [filteredDraftDetalhes, tabelaPrecos]);
+    }, [filteredDraftDetalhes, effectiveTabelaPrecos]);
 
     // Group shipping costs by state/region
     const shippingByState = useMemo(() => {
         const byState: Record<string, { detalhes: DetalheEnvio[], total: number }> = {};
         
         filteredDraftDetalhes.forEach(detalhe => {
-            const itemPreco = tabelaPrecos.find(c => c.id === detalhe.tabelaPrecoItemId);
+            const itemPreco = effectiveTabelaPrecos.find(c => c.id === detalhe.tabelaPrecoItemId);
             if (!itemPreco) return;
             
             const isShippingItem = itemPreco.categoria === 'Envios' || itemPreco.categoria === 'Retornos';
@@ -213,7 +237,7 @@ const InvoiceGenerationView: React.FC<InvoiceGenerationViewProps> = ({ clientes,
         });
         
         return byState;
-    }, [filteredDraftDetalhes, tabelaPrecos]);
+    }, [filteredDraftDetalhes, effectiveTabelaPrecos]);
 
     const manualPresetsByCategory = useMemo(() => {
         return manualCostPresets.reduce<Record<string, CustoManualPreset[]>>((acc, preset) => {
@@ -231,7 +255,7 @@ const InvoiceGenerationView: React.FC<InvoiceGenerationViewProps> = ({ clientes,
         Object.entries(groupedByOrder).forEach(([orderCode, categories]) => {
             let orderTotal = 0;
             Object.values(categories).flat().forEach(detalhe => {
-                const itemPreco = tabelaPrecos.find(c => c.id === detalhe.tabelaPrecoItemId);
+                const itemPreco = effectiveTabelaPrecos.find(c => c.id === detalhe.tabelaPrecoItemId);
                 if (!itemPreco) return;
                 
                 const isShippingItem = itemPreco.categoria === 'Envios' || itemPreco.categoria === 'Retornos';
@@ -252,7 +276,7 @@ const InvoiceGenerationView: React.FC<InvoiceGenerationViewProps> = ({ clientes,
         });
         
         return totals;
-    }, [groupedByOrder, tabelaPrecos]);
+    }, [groupedByOrder, effectiveTabelaPrecos]);
 
     const toggleOrder = (orderCode: string) => {
         setExpandedOrders(prev => {
@@ -277,7 +301,7 @@ const InvoiceGenerationView: React.FC<InvoiceGenerationViewProps> = ({ clientes,
         const categories: Record<string, { total: number, count: number }> = {};
         
         draftDetalhes.forEach(detalhe => {
-            const itemPreco = tabelaPrecos.find(c => c.id === detalhe.tabelaPrecoItemId);
+            const itemPreco = effectiveTabelaPrecos.find(c => c.id === detalhe.tabelaPrecoItemId);
             if (!itemPreco) return;
             
             const category = itemPreco.categoria || 'Outros';
@@ -301,20 +325,21 @@ const InvoiceGenerationView: React.FC<InvoiceGenerationViewProps> = ({ clientes,
         });
         
         return categories;
-    }, [draftDetalhes, tabelaPrecos]);
+    }, [draftDetalhes, effectiveTabelaPrecos]);
 
     const recalculateDraftTotals = (detalhes: DetalheEnvio[], custosAdicionais: CustoAdicional[]): Omit<CobrancaMensal, 'id' | 'clienteId' | 'mesReferencia' | 'dataVencimento' | 'status'> => {
         let totalEnvio = 0;
         let totalArmazenagem = 0;
         let totalCustosLogisticos = 0;
+        let totalCustosAdicionaisFromLineItems = 0;
         let custoTotalItens = 0; // Renamed to avoid confusion
         let quantidadeEnvios = 0; // Count of shipments
-        
+
         const envioCats = ['Envios', 'Retornos'];
 
         detalhes.forEach(detalhe => {
             if (!detalhe.tabelaPrecoItemId) return;
-            const itemPreco = tabelaPrecos.find(c => c.id === detalhe.tabelaPrecoItemId);
+            const itemPreco = effectiveTabelaPrecos.find(c => c.id === detalhe.tabelaPrecoItemId);
             if (itemPreco) {
                 const isTemplate = isTemplateItem(itemPreco);
                 const isDifalItem = itemPreco.categoria === 'Difal' || itemPreco.descricao?.toLowerCase().includes('difal');
@@ -345,8 +370,10 @@ const InvoiceGenerationView: React.FC<InvoiceGenerationViewProps> = ({ clientes,
                 const subtotalVenda = precoVendaCalculado * quantidadeUsada;
                 custoTotalItens += subtotalCusto;
                 
-                const group = getCostCategoryGroup(itemPreco.categoria);
-                if (group === 'armazenagem') {
+                const group = getCostCategoryGroupForItem(itemPreco);
+                if (group === 'custosAdicionais') {
+                    totalCustosAdicionaisFromLineItems += subtotalVenda;
+                } else if (group === 'armazenagem') {
                     totalArmazenagem += subtotalVenda;
                 } else if (group === 'envio') {
                     totalEnvio += subtotalVenda;
@@ -363,15 +390,57 @@ const InvoiceGenerationView: React.FC<InvoiceGenerationViewProps> = ({ clientes,
         
         const totalCustosAdicionaisRegulares = custosRegulares.reduce((sum, custo) => sum + custo.valor, 0);
         const totalReembolsos = reembolsos.reduce((sum, custo) => sum + custo.valor, 0);
-        const totalCustosAdicionais = totalCustosAdicionaisRegulares - totalReembolsos; // Reembolsos são subtraídos
+        const totalCustosAdicionais = totalCustosAdicionaisFromLineItems + totalCustosAdicionaisRegulares - totalReembolsos; // Reembolsos são subtraídos
         const totalCustosExtras = draftCobranca?.totalCustosExtras || 0;
 
         // Assume 0 margin for additional/extra costs, so their cost is equal to their value. This ensures profit is calculated correctly.
         const custoTotal = custoTotalItens + totalCustosAdicionaisRegulares + totalCustosExtras - totalReembolsos;
-        const valorTotal = totalEnvio + totalArmazenagem + totalCustosLogisticos + totalCustosExtras + totalCustosAdicionaisRegulares - totalReembolsos;
+        const valorTotal = totalEnvio + totalArmazenagem + totalCustosLogisticos + totalCustosExtras + totalCustosAdicionais;
         
         return { totalEnvio, quantidadeEnvios, totalArmazenagem, totalCustosLogisticos, totalCustosAdicionais, totalCustosExtras, valorTotal, custoTotal };
     };
+
+    useEffect(() => {
+        if (!invoiceSummary || !draftCobranca) return;
+
+        let totalDifal = 0;
+        let quantidadeDifal = 0;
+        const uniqueOrders = new Set<string>();
+
+        draftDetalhes.forEach(detalhe => {
+            if (detalhe.codigoPedido && detalhe.codigoPedido !== 'ARMAZENAGEM') {
+                uniqueOrders.add(detalhe.codigoPedido);
+            }
+            if (!detalhe.tabelaPrecoItemId) return;
+            const itemPreco = effectiveTabelaPrecos.find(c => c.id === detalhe.tabelaPrecoItemId);
+            if (itemPreco && (itemPreco.categoria === 'Difal' || itemPreco.descricao?.toLowerCase().includes('difal'))) {
+                totalDifal += detalhe.quantidade;
+                quantidadeDifal++;
+            }
+        });
+
+        const custosRegulares = draftCustosAdicionais.filter(c => !c.isReembolso);
+        const reembolsos = draftCustosAdicionais.filter(c => c.isReembolso);
+
+        setInvoiceSummary(prev => prev ? {
+            ...prev,
+            totalEnvios: draftCobranca.totalEnvio,
+            totalArmazenagem: draftCobranca.totalArmazenagem,
+            totalCustosLogisticos: draftCobranca.totalCustosLogisticos,
+            totalGeral: draftCobranca.valorTotal,
+            quantidadeEnvios: draftCobranca.quantidadeEnvios ?? prev.quantidadeEnvios,
+            totalDifal,
+            quantidadeDifal,
+            totalPedidosUnicos: uniqueOrders.size,
+            custosAdicionaisDetalhados: custosRegulares.map(c => ({
+                descricao: c.descricao,
+                valor: c.valor,
+                categoria: c.categoria,
+            })),
+            totalReembolsos: reembolsos.reduce((sum, c) => sum + c.valor, 0),
+            quantidadeReembolsos: reembolsos.length,
+        } : null);
+    }, [draftCobranca, draftDetalhes, draftCustosAdicionais, effectiveTabelaPrecos]);
 
     const handleProcess = async () => {
         if (!clientId || !month || !storageStartDate || !hasOrderDetail) {
@@ -1046,7 +1115,7 @@ const InvoiceGenerationView: React.FC<InvoiceGenerationViewProps> = ({ clientes,
                         <p className="text-2xl font-bold text-gray-900">{invoiceSummary.totalPedidosUnicos}</p>
                     </div>
                     <div className="bg-white p-3 rounded-lg border border-blue-200 shadow-sm">
-                        <p className="text-xs text-gray-500 uppercase font-medium">Envios ({invoiceSummary.quantidadeEnvios})</p>
+                        <p className="text-xs text-gray-500 uppercase font-medium">Envios</p>
                         <p className="text-lg font-bold text-blue-700">{formatCurrency(invoiceSummary.totalEnvios)}</p>
                     </div>
                     <div className="bg-white p-3 rounded-lg border border-purple-200 shadow-sm">
@@ -1115,7 +1184,7 @@ const InvoiceGenerationView: React.FC<InvoiceGenerationViewProps> = ({ clientes,
                         <div className="space-y-1">
                             {invoiceSummary.entradasMaterial.map((entrada, idx) => (
                                 <div key={idx} className="flex justify-between items-center text-xs bg-white px-2 py-1.5 rounded border border-indigo-100">
-                                    <span className="text-indigo-700">{entrada.descricao}</span>
+                                    <span className="text-indigo-700">{getDisplayDescriptionForPriceItem(entrada.descricao)}</span>
                                     <div className="flex gap-3">
                                         <span className="text-gray-500">{entrada.quantidade} un.</span>
                                         <span className="font-semibold text-indigo-800">{formatCurrency(entrada.valorTotal)}</span>
@@ -1132,8 +1201,8 @@ const InvoiceGenerationView: React.FC<InvoiceGenerationViewProps> = ({ clientes,
                         <p className="text-sm font-semibold text-amber-800 mb-2">➕ Custos Adicionais ({draftCustosAdicionais.filter(c => !c.isReembolso).length})</p>
                         <div className="space-y-1">
                             {draftCustosAdicionais.filter(c => !c.isReembolso).map((custo, idx) => (
-                                <div key={custo.id} className="flex justify-between items-center text-xs bg-white px-2 py-1.5 rounded border border-amber-100">
-                                    <span className="text-amber-700">{custo.descricao || 'Sem descrição'}</span>
+                                <div key={`custo-${idx}-${custo.id}`} className="flex justify-between items-center text-xs bg-white px-2 py-1.5 rounded border border-amber-100">
+                                    <span className="text-amber-700">{getDisplayDescriptionForPriceItem(custo.descricao) || 'Sem descrição'}</span>
                                     <div className="flex gap-3">
                                         <span className="text-gray-500">{custo.categoria || 'Outro'}</span>
                                         <span className="font-semibold text-amber-800">{formatCurrency(custo.valor)}</span>
@@ -1151,9 +1220,9 @@ const InvoiceGenerationView: React.FC<InvoiceGenerationViewProps> = ({ clientes,
                         <p className="text-xs text-emerald-600 mb-2">Valores que serão subtraídos do total da fatura:</p>
                         <div className="space-y-1">
                             {draftCustosAdicionais.filter(c => c.isReembolso).map((custo, idx) => (
-                                <div key={custo.id} className="flex justify-between items-center text-xs bg-white px-2 py-1.5 rounded border border-emerald-200">
+                                <div key={`custo-reemb-${idx}-${custo.id}`} className="flex justify-between items-center text-xs bg-white px-2 py-1.5 rounded border border-emerald-200">
                                     <div className="flex flex-col">
-                                        <span className="text-emerald-700 font-medium">{custo.descricao || 'Sem descrição'}</span>
+                                        <span className="text-emerald-700 font-medium">{getDisplayDescriptionForPriceItem(custo.descricao) || 'Sem descrição'}</span>
                                         {custo.motivoReembolso && (
                                             <span className="text-gray-500 text-[10px]">{custo.motivoReembolso}</span>
                                         )}
@@ -1191,9 +1260,6 @@ const InvoiceGenerationView: React.FC<InvoiceGenerationViewProps> = ({ clientes,
                 <div className="bg-gray-100 p-4 rounded-lg">
                     <p className="text-sm text-gray-600">Total Envios</p>
                     <p className="text-xl font-bold">{formatCurrency(draftCobranca!.totalEnvio)}</p>
-                    {draftCobranca!.quantidadeEnvios !== undefined && draftCobranca!.quantidadeEnvios > 0 && (
-                        <p className="text-xs text-gray-500 mt-1">{draftCobranca!.quantidadeEnvios} envio(s)</p>
-                    )}
                 </div>
                 <div className="bg-gray-100 p-4 rounded-lg"><p className="text-sm text-gray-600">Total Logística</p><p className="text-xl font-bold">{formatCurrency(draftCobranca!.totalCustosLogisticos)}</p></div>
                 <div className="bg-gray-100 p-4 rounded-lg"><p className="text-sm text-gray-600">Total Armazenagem</p><p className="text-xl font-bold">{formatCurrency(draftCobranca!.totalArmazenagem)}</p></div>
@@ -1323,7 +1389,7 @@ const InvoiceGenerationView: React.FC<InvoiceGenerationViewProps> = ({ clientes,
                                     <div className="bg-white">
                                         {Object.entries(categories).map(([category, categoryDetails]) => {
                                             const categoryTotal = categoryDetails.reduce((sum, detalhe) => {
-                                                const itemPreco = tabelaPrecos.find(c => c.id === detalhe.tabelaPrecoItemId);
+                                                const itemPreco = effectiveTabelaPrecos.find(c => c.id === detalhe.tabelaPrecoItemId);
                                                 if (!itemPreco) return sum;
                                                 
                                                 const isTemplate = isTemplateItem(itemPreco);
@@ -1364,8 +1430,8 @@ const InvoiceGenerationView: React.FC<InvoiceGenerationViewProps> = ({ clientes,
                                                                 </tr>
                                                             </thead>
                                                             <tbody className="bg-white divide-y divide-gray-200">
-                                                                {categoryDetails.map(d => {
-                                                                    const itemPreco = tabelaPrecos.find(c => c.id === d.tabelaPrecoItemId);
+                                                                {categoryDetails.map((d, di) => {
+                                                                    const itemPreco = effectiveTabelaPrecos.find(c => c.id === d.tabelaPrecoItemId);
                                                                     let subtotal = 0;
                                                                     let precoVenda = 0;
                                                                     let margem: number | undefined = undefined;
@@ -1392,12 +1458,12 @@ const InvoiceGenerationView: React.FC<InvoiceGenerationViewProps> = ({ clientes,
                                                                         }
                                                                     }
                                                                     return (
-                                                                        <tr key={d.id} className={!d.tabelaPrecoItemId ? 'bg-yellow-50' : ''}>
+                                                                        <tr key={`detalhe-${di}-${d.id}`} className={!d.tabelaPrecoItemId ? 'bg-yellow-50' : ''}>
                                                                             <td className="px-2 py-2 whitespace-nowrap text-sm">
                                                                                 <FormInput type="text" value={d.rastreio} onChange={(e) => handleDetalheChange(d.id, 'rastreio', e.target.value)} placeholder="Rastreio" className="w-32 text-xs p-1" />
                                                                             </td>
                                                                             <td className="px-2 py-2 whitespace-nowrap text-sm">
-                                                                                <FormSelect onChange={(e) => handleDetalheChange(d.id, 'tabelaPrecoItemId', e.target.value)} className={`w-full text-xs p-1 ${!d.tabelaPrecoItemId ? 'border-yellow-400' : ''}`} value={d.tabelaPrecoItemId || ""}><option value="" disabled>Selecione um serviço...</option>{tabelaPrecos.map(c => <option key={c.id} value={c.id}>{`${c.subcategoria} - ${c.descricao}`}</option>)}</FormSelect>
+                                                                                <FormSelect onChange={(e) => handleDetalheChange(d.id, 'tabelaPrecoItemId', e.target.value)} className={`w-full text-xs p-1 ${!d.tabelaPrecoItemId ? 'border-yellow-400' : ''}`} value={d.tabelaPrecoItemId || ""}><option value="" disabled>Selecione um serviço...</option>{effectiveTabelaPrecos.map((c, oIdx) => <option key={`opt-${oIdx}-${c.id}`} value={c.id}>{`${c.subcategoria} - ${getDisplayDescriptionForPriceItem(c.descricao)}`}</option>)}</FormSelect>
                                                                             </td>
                                                                             <td className="px-2 py-2 whitespace-nowrap text-sm">
                                                                                 <FormInput type="number" value={d.quantidade} onChange={(e) => handleDetalheChange(d.id, 'quantidade', e.target.value)} className="w-20 text-xs p-1 text-right" step="0.01"/>
@@ -1449,8 +1515,8 @@ const InvoiceGenerationView: React.FC<InvoiceGenerationViewProps> = ({ clientes,
                             </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
-                            {draftDetalhes.map(d => {
-                                const itemPreco = tabelaPrecos.find(c => c.id === d.tabelaPrecoItemId);
+                            {draftDetalhes.map((d, di) => {
+                                const itemPreco = effectiveTabelaPrecos.find(c => c.id === d.tabelaPrecoItemId);
                                 // Special handling for non-template shipping items
                                 let subtotal = 0;
                                 let precoVenda = 0;
@@ -1479,13 +1545,13 @@ const InvoiceGenerationView: React.FC<InvoiceGenerationViewProps> = ({ clientes,
                                         }
                                     }
                                 return (
-                                    <tr key={d.id} className={!d.tabelaPrecoItemId ? 'bg-yellow-50' : ''}>
+                                    <tr key={`detalhe-${di}-${d.id}`} className={!d.tabelaPrecoItemId ? 'bg-yellow-50' : ''}>
                                         <td className="px-2 py-2 whitespace-nowrap text-sm">
                                             <FormInput type="text" value={d.rastreio} onChange={(e) => handleDetalheChange(d.id, 'rastreio', e.target.value)} placeholder="Rastreio" className="w-40 text-xs p-1" />
                                             <FormInput type="text" value={d.codigoPedido} onChange={(e) => handleDetalheChange(d.id, 'codigoPedido', e.target.value)} placeholder="Pedido" className="w-40 text-xs p-1 mt-1" />
                                         </td>
                                         <td className="px-2 py-2 whitespace-nowrap text-sm">
-                                             <FormSelect onChange={(e) => handleDetalheChange(d.id, 'tabelaPrecoItemId', e.target.value)} className={`w-full text-xs p-1 ${!d.tabelaPrecoItemId ? 'border-yellow-400' : ''}`} value={d.tabelaPrecoItemId || ""}><option value="" disabled>Selecione um serviço...</option>{tabelaPrecos.map(c => <option key={c.id} value={c.id}>{`${c.subcategoria} - ${c.descricao}`}</option>)}</FormSelect>
+                                             <FormSelect onChange={(e) => handleDetalheChange(d.id, 'tabelaPrecoItemId', e.target.value)} className={`w-full text-xs p-1 ${!d.tabelaPrecoItemId ? 'border-yellow-400' : ''}`} value={d.tabelaPrecoItemId || ""}><option value="" disabled>Selecione um serviço...</option>{effectiveTabelaPrecos.map((c, oIdx) => <option key={`opt-${oIdx}-${c.id}`} value={c.id}>{`${c.subcategoria} - ${getDisplayDescriptionForPriceItem(c.descricao)}`}</option>)}</FormSelect>
                                         </td>
                                         <td className="px-2 py-2 whitespace-nowrap text-sm">
                                             <FormInput type="number" value={d.quantidade} onChange={(e) => handleDetalheChange(d.id, 'quantidade', e.target.value)} className="w-20 text-xs p-1 text-right" step="0.01"/>
@@ -1558,15 +1624,15 @@ const InvoiceGenerationView: React.FC<InvoiceGenerationViewProps> = ({ clientes,
                                     </button>
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                                    {presets.map(preset => (
+                                    {presets.map((preset, pIdx) => (
                                         <button
-                                            key={preset.id}
+                                            key={`preset-${categoria}-${pIdx}-${preset.id}`}
                                             type="button"
                                             onClick={() => handleAddPreset(preset)}
                                             className="flex items-center justify-between px-3 py-2 text-left text-sm border rounded-md hover:border-blue-400 hover:bg-blue-50 transition"
                                             disabled={presetAlreadyAdded(preset)}
                                         >
-                                            <span className="text-gray-800">{preset.descricao}</span>
+                                            <span className="text-gray-800">{getDisplayDescriptionForPriceItem(preset.descricao)}</span>
                                             <span className="text-blue-700 font-semibold">{formatCurrency(preset.valor)}</span>
                                         </button>
                                     ))}
@@ -1587,7 +1653,7 @@ const InvoiceGenerationView: React.FC<InvoiceGenerationViewProps> = ({ clientes,
                 <h4 className="font-semibold text-gray-700 mb-2">Custos Adicionais / Manuais</h4>
                  <div className="space-y-2">
                     {draftCustosAdicionais.map((custo, index) => (
-                        <div key={custo.id} className={`p-3 rounded-md border ${custo.isReembolso ? 'bg-green-50 border-green-300' : 'bg-gray-50 border-gray-200'}`}>
+                        <div key={`custo-${index}-${custo.id}`} className={`p-3 rounded-md border ${custo.isReembolso ? 'bg-green-50 border-green-300' : 'bg-gray-50 border-gray-200'}`}>
                             <div className="flex items-center gap-2">
                                 <FormInput 
                                     type="text" 

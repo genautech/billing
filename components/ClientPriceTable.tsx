@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import type { TabelaPrecoItem } from '../types';
-import { calculatePrecoVendaForDisplay } from '../services/firestoreService';
+import { calculatePrecoVendaForDisplay, getDisplayDescriptionForPriceItem, isRecebimentoItensExternos } from '../services/firestoreService';
 
 interface ClientPriceTableProps {
     tabelaPrecos: TabelaPrecoItem[];
@@ -13,7 +13,7 @@ const ClientPriceTable: React.FC<ClientPriceTableProps> = ({ tabelaPrecos }) => 
 
     const difalBanner = (
         <div className="mb-4 p-3 rounded-md border border-purple-200 bg-purple-50 text-sm text-purple-800">
-            <strong>DIFAL:</strong> Cobrança mínima de R$ 3,00 por pedido (margem de 200% sobre custo base). XMLs de notas de remessa são apenas comprovantes de envio e não alteram o valor cobrado.
+            <strong>DIFAL:</strong> Cobrança mínima de R$ 3,00 por pedido. XMLs de notas de remessa são apenas comprovantes de envio e não alteram o valor cobrado.
         </div>
     );
 
@@ -79,12 +79,12 @@ const ClientPriceTable: React.FC<ClientPriceTableProps> = ({ tabelaPrecos }) => 
                                                 </tr>
                                             </thead>
                                             <tbody className="bg-white divide-y divide-gray-200">
-                                                {groupedPrecos[categoria][subcategoria].map(item => (
-                                                    <tr key={item.id}>
+                                                {groupedPrecos[categoria][subcategoria].map((item, idx) => (
+                                                    <tr key={`${categoria}-${subcategoria}-${idx}-${item.id}`}>
                                                         <td className="px-4 py-4 whitespace-normal text-sm font-medium text-gray-800">
                                                             <div className="flex items-center gap-2">
-                                                                <span>{item.descricao}</span>
-                                                                {item.descricao === 'Itens externos recebidos/ unidade' && (
+                                                                <span>{getDisplayDescriptionForPriceItem(item.descricao)}</span>
+                                                                {(item.descricao === 'Itens externos recebidos/ unidade' || isRecebimentoItensExternos(item)) && (
                                                                     <div className="relative group">
                                                                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400 cursor-pointer" viewBox="0 0 20 20" fill="currentColor">
                                                                             <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />

@@ -7,6 +7,11 @@ service cloud.firestore {
     // Clientes
     match /clientes/{clienteId} {
       allow read, write: if true;
+      
+      // Subcollection: Custos Manuais por Cliente
+      match /custosManuais/{custoId} {
+        allow read, write: if true;
+      }
     }
     
     // Tabela de Preços Global
@@ -48,6 +53,11 @@ service cloud.firestore {
     
     // Presets de custos manuais
     match /custoManualPresets/{presetId} {
+      allow read, write: if true;
+    }
+    
+    // Documentos de Pedidos
+    match /documentosPedidos/{docId} {
       allow read, write: if true;
     }
   }

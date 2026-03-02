@@ -188,7 +188,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ isAdminViewing, authenticat
         }
     }, [selectedCobranca]);
 
-    const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+    const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
     const formatDate = (dateString: string) => new Date(dateString + 'T00:00:00').toLocaleDateString('pt-BR');
 
     if (isInitialLoading) {
@@ -238,8 +238,8 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ isAdminViewing, authenticat
                         <div className="lg:col-span-1 bg-white p-6 rounded-lg shadow-md">
                             <h3 className="text-lg font-semibold text-gray-800 mb-4">Faturas Mensais</h3>
                             <div className="space-y-3 max-h-[600px] overflow-y-auto">
-                                {isCobrancasLoading ? <p>Carregando faturas...</p> : clientCobrancas.length > 0 ? clientCobrancas.map(cobranca => (
-                                    <div key={cobranca.id} onClick={() => setSelectedCobranca(cobranca)}
+                                {isCobrancasLoading ? <p>Carregando faturas...</p> : clientCobrancas.length > 0 ? clientCobrancas.map((cobranca, ci) => (
+                                    <div key={`cobranca-${ci}-${cobranca.id}`} onClick={() => setSelectedCobranca(cobranca)}
                                         className={`p-4 rounded-lg cursor-pointer border-2 transition-all duration-200 ${
                                             selectedCobranca?.id === cobranca.id
                                                 ? 'bg-blue-50 border-blue-500 shadow-lg'

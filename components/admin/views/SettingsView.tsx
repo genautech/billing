@@ -4,7 +4,7 @@ import { useToast } from '../../../contexts/ToastContext';
 import { FormInput, FormSelect } from '../../ui/FormControls';
 import PriceTableUpload from './PriceTableUpload';
 import PriceItemModal from './PriceItemModal';
-import { addTabelaPrecoItem, updateTabelaPrecoItem, deleteTabelaPrecoItem, batchUpdatePriceMargins, updateTPItemsMargin } from '../../../services/firestoreService';
+import { addTabelaPrecoItem, updateTabelaPrecoItem, deleteTabelaPrecoItem, batchUpdatePriceMargins, updateTPItemsMargin, getDisplayDescriptionForPriceItem } from '../../../services/firestoreService';
 
 // --- Local Confirmation Modal Component ---
 const ConfirmDeleteModal: React.FC<{
@@ -358,7 +358,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ tabelaPrecos, onUpdate }) =
         }
     };
     
-    const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(value);
+    const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
 
     return (
         <div className="space-y-6">
@@ -401,10 +401,10 @@ const SettingsView: React.FC<SettingsViewProps> = ({ tabelaPrecos, onUpdate }) =
                             </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
-                            {tabelaPrecos.map(item => (
-                                <tr key={item.id}>
+                            {tabelaPrecos.map((item, itemIdx) => (
+                                <tr key={`tabela-item-${itemIdx}-${item.id}`}>
                                     <td className="px-4 py-4 whitespace-normal text-sm font-medium text-gray-900">
-                                        <div>{item.descricao}</div>
+                                        <div>{getDisplayDescriptionForPriceItem(item.descricao)}</div>
                                         <div className="text-xs text-gray-500">{item.categoria} / {item.subcategoria}</div>
                                     </td>
                                     <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
@@ -445,7 +445,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ tabelaPrecos, onUpdate }) =
                 onClose={() => setIsConfirmDeleteModalOpen(false)}
                 onConfirm={handleConfirmDelete}
                 isDeleting={isDeleting}
-                itemName={itemToDelete?.descricao || ''}
+                itemName={itemToDelete ? getDisplayDescriptionForPriceItem(itemToDelete.descricao) : ''}
             />
         </div>
     );

@@ -1,13 +1,16 @@
 import React, { useMemo, useEffect, useState } from 'react';
-import type { CobrancaMensal, Cliente, DetalheEnvio, TabelaPrecoItem } from '../types';
-import { 
-    countShipmentsInMonth, 
-    getDetalhesByCobrancaId, 
-    getTabelaPrecos, 
-    calculatePrecoVendaForDisplay, 
-    isTemplateItem, 
+import type { CobrancaMensal, Cliente, DetalheEnvio, TabelaPrecoItem, CustoAdicional } from '../types';
+import {
+    countShipmentsInMonth,
+    getDetalhesByCobrancaId,
+    getCustosAdicionaisByCobrancaId,
+    getTabelaPrecos,
+    calculatePrecoVendaForDisplay,
+    calculatePrecoVenda,
+    isTemplateItem,
     getLastInvoiceStorageQuantities,
-    getCostCategoryGroup 
+    getCostCategoryGroup,
+    createFindItemPreco
 } from '../services/firestoreService';
 import {
     AreaChart,
@@ -332,10 +335,12 @@ const BrazilMapChart: React.FC<{
 };
 
 // Custom Treemap with improved visuals
-const CostsTreemap: React.FC<{ 
+const CostsTreemap: React.FC<{
     data: { label: string; value: number }[];
     formatCurrency: (v: number) => string;
-}> = ({ data, formatCurrency }) => {
+    /** Label for the total (e.g. "Total Envios (R$)" to clarify only shipping) */
+    totalLabel?: string;
+}> = ({ data, formatCurrency, totalLabel = 'Custo Total' }) => {
     const [hoveredItem, setHoveredItem] = useState<string | null>(null);
     const total = useMemo(() => data.reduce((sum, d) => sum + d.value, 0), [data]);
 
@@ -379,7 +384,7 @@ const CostsTreemap: React.FC<{
             <div className="flex justify-between items-center mb-3 px-1">
                 <div className="flex items-center gap-2">
                     <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></div>
-                    <span className="text-xs font-medium text-slate-600">Custo Total</span>
+                    <span className="text-xs font-medium text-slate-600">{totalLabel}</span>
                 </div>
                 <span className="text-lg font-bold text-slate-800">{formatCurrency(total)}</span>
             </div>
@@ -512,15 +517,15 @@ const DonutChart: React.FC<{
     
     return (
         <div className="flex items-center gap-4">
-            <div className="relative" style={{ width: '140px', height: '140px' }}>
+            <div className="relative flex-shrink-0" style={{ width: '160px', height: '160px' }}>
                 <ResponsiveContainer width="100%" height="100%">
-                    <RechartsPieChart>
+                    <RechartsPieChart margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
                         <Pie
                             data={chartData}
                             cx="50%"
                             cy="50%"
-                            innerRadius={40}
-                            outerRadius={65}
+                            innerRadius={44}
+                            outerRadius={72}
                             paddingAngle={2}
                             dataKey="value"
                         >
@@ -533,12 +538,16 @@ const DonutChart: React.FC<{
                             contentStyle={{ 
                                 borderRadius: '8px', 
                                 border: 'none', 
-                                boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' 
+                                boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
+                                padding: '8px 12px',
+                                fontSize: '12px'
                             }}
+                            position={{ x: 0, y: 0 }}
+                            wrapperStyle={{ zIndex: 10 }}
                         />
                     </RechartsPieChart>
                 </ResponsiveContainer>
-                {/* Center total */}
+                {/* Center total - above tooltip layer */}
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                     <div className="text-center">
                         <p className="text-xs text-gray-500">Total</p>
@@ -547,7 +556,7 @@ const DonutChart: React.FC<{
                 </div>
             </div>
             {/* Compact legend */}
-            <div className="flex-1 space-y-1">
+            <div className="flex-1 space-y-1 min-w-0">
                 {data.map(item => (
                     <div key={item.label} className="flex items-center justify-between text-xs">
                         <div className="flex items-center gap-1.5">
@@ -562,14 +571,15 @@ const DonutChart: React.FC<{
     );
 };
 
-// Area chart for billing history
+// Area chart for billing history and entrada de material (height, domain and margins to avoid overlap)
 const BillingAreaChart: React.FC<{ 
     data: { label: string; value: number }[];
     formatCurrency: (v: number) => string;
 }> = ({ data, formatCurrency }) => {
+    const gradientId = React.useId().replace(/:/g, '');
     if (data.length === 0) {
         return (
-            <div className="flex items-center justify-center h-32 bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg">
+            <div className="flex items-center justify-center h-40 bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg">
                 <p className="text-sm text-gray-500">Sem histórico</p>
             </div>
         );
@@ -578,6 +588,8 @@ const BillingAreaChart: React.FC<{
     const chartData = data.map(d => ({ name: d.label, value: d.value }));
     const total = data.reduce((sum, d) => sum + d.value, 0);
     const avg = data.length > 0 ? total / data.length : 0;
+    const maxVal = Math.max(...chartData.map(d => d.value), 1);
+    const yDomain = [0, maxVal * 1.15] as [number, number];
 
     return (
         <div>
@@ -585,11 +597,11 @@ const BillingAreaChart: React.FC<{
                 <span className="text-xs font-medium text-gray-500">Média mensal</span>
                 <span className="text-sm font-bold text-gray-800">{formatCurrency(avg)}</span>
             </div>
-            <div style={{ height: '120px' }}>
+            <div style={{ height: '180px' }}>
                 <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                    <AreaChart data={chartData} margin={{ top: 12, right: 16, left: 8, bottom: 8 }}>
                         <defs>
-                            <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
+                            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
                                 <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
                                 <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
                             </linearGradient>
@@ -598,13 +610,15 @@ const BillingAreaChart: React.FC<{
                             dataKey="name" 
                             axisLine={false} 
                             tickLine={false} 
-                            tick={{ fontSize: 10, fill: '#6b7280' }}
+                            tick={{ fontSize: 11, fill: '#6b7280' }}
                         />
                         <YAxis 
+                            domain={yDomain}
                             axisLine={false} 
                             tickLine={false} 
-                            tick={{ fontSize: 9, fill: '#9ca3af' }}
+                            tick={{ fontSize: 10, fill: '#9ca3af' }}
                             tickFormatter={(v) => `${(v/1000).toFixed(0)}k`}
+                            width={32}
                         />
                         <Tooltip 
                             formatter={(value: number) => [formatCurrency(value), 'Valor']}
@@ -612,17 +626,19 @@ const BillingAreaChart: React.FC<{
                                 borderRadius: '8px', 
                                 border: 'none', 
                                 boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
-                                fontSize: '12px'
+                                fontSize: '12px',
+                                padding: '8px 12px'
                             }}
+                            wrapperStyle={{ outline: 'none' }}
                         />
                         <Area 
                             type="monotone" 
                             dataKey="value" 
                             stroke="#3b82f6" 
                             strokeWidth={2}
-                            fill="url(#areaGradient)"
-                            dot={{ r: 3, fill: '#3b82f6', strokeWidth: 0 }}
-                            activeDot={{ r: 5, fill: '#2563eb', strokeWidth: 0 }}
+                            fill={`url(#${gradientId})`}
+                            dot={{ r: 4, fill: '#3b82f6', strokeWidth: 0 }}
+                            activeDot={{ r: 6, fill: '#2563eb', strokeWidth: 0 }}
                         />
                     </AreaChart>
                 </ResponsiveContainer>
@@ -632,7 +648,7 @@ const BillingAreaChart: React.FC<{
 };
 
 const ClientDashboard: React.FC<ClientDashboardProps> = ({ clientCobrancas, client }) => {
-    const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+    const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
     const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
     const [selectedInvoiceDetalhes, setSelectedInvoiceDetalhes] = useState<DetalheEnvio[]>([]);
     const [tabelaPrecos, setTabelaPrecos] = useState<TabelaPrecoItem[]>([]);
@@ -647,6 +663,7 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ clientCobrancas, clie
         binsEstimados: 0,
         isLoading: true
     });
+    const [selectedInvoiceCustosAdicionais, setSelectedInvoiceCustosAdicionais] = useState<CustoAdicional[]>([]);
 
     // Set default selected invoice
     useEffect(() => {
@@ -666,12 +683,14 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ clientCobrancas, clie
             try {
                 if (!selectedInvoice) return;
                 
-                const [precosData, detalhes] = await Promise.all([
+                const [precosData, detalhes, custosAdic] = await Promise.all([
                     getTabelaPrecos(client?.id),
-                    getDetalhesByCobrancaId(selectedInvoice.id)
+                    getDetalhesByCobrancaId(selectedInvoice.id),
+                    getCustosAdicionaisByCobrancaId(selectedInvoice.id)
                 ]);
                 setTabelaPrecos(precosData);
                 setSelectedInvoiceDetalhes(detalhes);
+                setSelectedInvoiceCustosAdicionais(custosAdic);
                 
                 console.log('📊 Dashboard - Selected Invoice Details:', {
                     mesReferencia: selectedInvoice.mesReferencia,
@@ -685,6 +704,8 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ clientCobrancas, clie
         };
         if (selectedInvoice) {
             fetchData();
+        } else {
+            setSelectedInvoiceCustosAdicionais([]);
         }
     }, [selectedInvoice, client?.id]);
 
@@ -738,8 +759,13 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ clientCobrancas, clie
             }));
     }, [clientCobrancas]);
 
+    // Same logic as ClientBillDetail: cobranca.totalCustosAdicionais ?? sum(custosAdicionais não reembolso)
     const breakdownChartData = useMemo(() => {
         if (!selectedInvoice) return [];
+        const custosRegulares = selectedInvoiceCustosAdicionais.filter(c => !c.isReembolso);
+        const totalCustosRegulares = custosRegulares.reduce((sum, c) => sum + c.valor, 0);
+        const totalAdicionais = selectedInvoice.totalCustosAdicionais ?? totalCustosRegulares;
+
         const data = [];
         if (selectedInvoice.totalEnvio > 0) {
             data.push({ label: 'Envio', value: selectedInvoice.totalEnvio, color: '#3b82f6' });
@@ -753,11 +779,11 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ clientCobrancas, clie
         if (selectedInvoice.totalCustosExtras && selectedInvoice.totalCustosExtras > 0) {
             data.push({ label: 'Extras', value: selectedInvoice.totalCustosExtras, color: '#f97316' });
         }
-        if (selectedInvoice.totalCustosAdicionais && selectedInvoice.totalCustosAdicionais > 0) {
-            data.push({ label: 'Adicionais', value: selectedInvoice.totalCustosAdicionais, color: '#f59e0b' });
+        if (totalAdicionais > 0) {
+            data.push({ label: 'Adicionais', value: totalAdicionais, color: '#f59e0b' });
         }
         return data;
-    }, [selectedInvoice]);
+    }, [selectedInvoice, selectedInvoiceCustosAdicionais]);
     
     // Use selected invoice details for state charts (to match invoice totals)
     const shipmentsByRegionData = useMemo(() => {
@@ -804,43 +830,82 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ clientCobrancas, clie
 
     }, [selectedInvoiceDetalhes, tabelaPrecos, selectedInvoice]);
 
-    // Use selected invoice details for cost chart
+    // Same unit price and quantity logic as the invoice (ClientBillDetail) so treemap matches fatura
+    const getPrecoUnitarioDetalhe = (detalhe: DetalheEnvio, itemPreco: TabelaPrecoItem | undefined): number => {
+        if (!itemPreco) return 0;
+        if (detalhe.precoUnitarioManual != null) return Number(detalhe.precoUnitarioManual);
+        const isShippingItem = itemPreco.categoria === 'Envios' || itemPreco.categoria === 'Retornos';
+        const isDifalItem = itemPreco.categoria === 'Difal' || itemPreco.descricao?.toLowerCase().includes('difal');
+        const isTemplate = isTemplateItem(itemPreco);
+        const DIFAL_MIN = 3.0;
+        if (isDifalItem) return Math.max(calculatePrecoVenda(itemPreco, detalhe.quantidade), DIFAL_MIN);
+        if (isTemplate || isShippingItem || isDifalItem) return calculatePrecoVenda(itemPreco, detalhe.quantidade);
+        return calculatePrecoVendaForDisplay(itemPreco);
+    };
+    const getQuantidadeExibida = (detalhe: DetalheEnvio, itemPreco: TabelaPrecoItem | undefined): number => {
+        if (!itemPreco) return 0;
+        const isShippingItem = itemPreco.categoria === 'Envios' || itemPreco.categoria === 'Retornos';
+        const isTemplate = isTemplateItem(itemPreco);
+        const isDifalItem = itemPreco.categoria === 'Difal' || itemPreco.descricao?.toLowerCase().includes('difal');
+        if (isDifalItem || (isShippingItem && !isTemplate)) return 1;
+        return detalhe.quantidade;
+    };
+
+    // Only shipping costs (Envios + Retornos) by state — same values as on the invoice.
+    // Uses createFindItemPreco so we resolve items the same way as ClientBillDetail (handles obsolete IDs).
     const shippingCostsByStateData = useMemo(() => {
         const stateCosts: Record<string, number> = {};
+        const findItemPreco = createFindItemPreco(tabelaPrecos);
 
         selectedInvoiceDetalhes.forEach(detalhe => {
             if (!detalhe.tabelaPrecoItemId) return;
-            
-            const itemPreco = tabelaPrecos.find(c => c.id === detalhe.tabelaPrecoItemId);
+
+            const itemPreco = findItemPreco(detalhe.tabelaPrecoItemId, {
+                codigoPedido: detalhe.codigoPedido,
+                quantidade: detalhe.quantidade
+            });
             if (!itemPreco) return;
 
             const isShippingItem = itemPreco.categoria === 'Envios' || itemPreco.categoria === 'Retornos';
             if (!isShippingItem) return;
 
-            const isTemplate = isTemplateItem(itemPreco);
-            let subtotal = isTemplate ? detalhe.quantidade : calculatePrecoVendaForDisplay(itemPreco) * detalhe.quantidade;
+            const precoUnitario = getPrecoUnitarioDetalhe(detalhe, itemPreco);
+            const quantidadeExibida = getQuantidadeExibida(detalhe, itemPreco);
+            const subtotal = precoUnitario * quantidadeExibida;
 
-            // Get estado - use 'N/I' (Não Informado) if missing
             let estado = (detalhe.estado || 'N/I').toUpperCase().trim();
             if (estado && estado !== 'N/I') {
-            const estadoMatch = estado.match(/\b([A-Z]{2})\b/);
-            if (estadoMatch) {
-                estado = estadoMatch[1];
-            } else if (estado.length > 2) {
-                estado = estado.substring(0, 2);
-                }
+                const estadoMatch = estado.match(/\b([A-Z]{2})\b/);
+                if (estadoMatch) estado = estadoMatch[1];
+                else if (estado.length > 2) estado = estado.substring(0, 2);
             }
 
             stateCosts[estado] = (stateCosts[estado] || 0) + subtotal;
         });
 
         if (Object.keys(stateCosts).length === 0) return [];
-        
+
         return Object.entries(stateCosts)
             .map(([label, value]) => ({ label, value }))
             .sort((a, b) => b.value - a.value);
-
     }, [selectedInvoiceDetalhes, tabelaPrecos]);
+
+    // Validate treemap total vs invoice total envio; show warning if they diverge (e.g. table changed after invoice)
+    const shippingTreemapValidation = useMemo(() => {
+        const totalTreemap = shippingCostsByStateData.reduce((sum, d) => sum + d.value, 0);
+        const totalFatura = selectedInvoice?.totalEnvio ?? 0;
+        const diff = Math.abs(totalTreemap - totalFatura);
+        const mismatch = diff > 0.01;
+        return { totalTreemap, totalFatura, mismatch };
+    }, [shippingCostsByStateData, selectedInvoice?.totalEnvio]);
+
+    // When mismatch: scale treemap data so total equals invoice total (proportions by state unchanged)
+    const shippingCostsByStateDataForChart = useMemo(() => {
+        const { totalTreemap, totalFatura, mismatch } = shippingTreemapValidation;
+        if (!mismatch || totalTreemap <= 0) return shippingCostsByStateData;
+        const scale = totalFatura / totalTreemap;
+        return shippingCostsByStateData.map((d) => ({ label: d.label, value: d.value * scale }));
+    }, [shippingCostsByStateData, shippingTreemapValidation]);
 
     const { averageOperationalCost, averageTotalValuePerShipment } = useMemo(() => {
         let totalShipmentCount = 0;
@@ -868,11 +933,11 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ clientCobrancas, clie
 
     return (
         <div className="space-y-4 animate-fade-in">
-            {/* Stats Row - Compact */}
+            {/* Stats Row - Compact - hide cards when value is N/A */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                <StatCard title="Última Fatura" value={latestInvoice ? formatCurrency(latestInvoice.valorTotal) : 'N/A'} />
-                <StatCard title="Média/Envio" value={averageTotalValuePerShipment} />
-                <StatCard title="Custo Op. Médio" value={averageOperationalCost} />
+                {latestInvoice && <StatCard title="Última Fatura" value={formatCurrency(latestInvoice.valorTotal)} />}
+                {averageTotalValuePerShipment !== 'N/A' && <StatCard title="Média/Envio" value={averageTotalValuePerShipment} />}
+                {averageOperationalCost !== 'N/A' && <StatCard title="Custo Op. Médio" value={averageOperationalCost} />}
                 <StatCard title="Em Estoque" value={client?.unidadesEmEstoque?.toLocaleString('pt-BR') || '0'} />
             </div>
 
@@ -934,32 +999,29 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ clientCobrancas, clie
                     <DonutChart data={breakdownChartData} formatCurrency={formatCurrency} />
                 </div>
 
-                {/* Brazil Map - Shipments */}
-                <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
-                    <h3 className="text-sm font-semibold text-gray-800 mb-1 flex items-center gap-2">
-                        <svg className="w-4 h-4 text-cyan-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                        </svg>
-                        Envios por Estado
-                    </h3>
-                    <BrazilMapChart 
-                        data={shipmentsByRegionData} 
-                        formatValue={(v) => `${v.toLocaleString('pt-BR')} envios`}
-                        mesReferencia={selectedInvoice?.mesReferencia}
-                        totalFatura={selectedInvoice?.quantidadeEnvios}
-                    />
-                </div>
-
                 {/* Treemap - Shipping Costs */}
-                <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+                <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition-shadow" title="Custos de envio (frete) da fatura do mês selecionado acima, distribuídos pelo estado de destino. O total do mapa deve coincidir com o Total Envios da fatura desse mês.">
                     <h3 className="text-sm font-semibold text-gray-800 mb-1 flex items-center gap-2">
                         <svg className="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
                         Custos por Estado
+                        <span
+                            className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-gray-200 text-gray-600 text-xs cursor-help"
+                            title="Valores vindos dos detalhes da fatura selecionada (mês escolhido em Período dos Gráficos). Apenas itens Envios/Retornos, por estado de destino. O total do mapa deve coincidir com o Total Envios da fatura desse mês, salvo alteração na tabela de preços ou itens inexistentes."
+                        >
+                            ?
+                        </span>
                     </h3>
-                    <CostsTreemap data={shippingCostsByStateData} formatCurrency={formatCurrency} />
+                    <p className="text-xs text-gray-500 mb-2">
+                        Custos de envio (frete) da fatura do mês selecionado, por estado de destino dos pedidos. Total do mapa = Total Envios da fatura.
+                    </p>
+                    {shippingTreemapValidation.mismatch && (
+                        <div className="mb-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs">
+                            O total dos custos por estado ({formatCurrency(shippingTreemapValidation.totalTreemap)}) difere do total de envios da fatura ({formatCurrency(shippingTreemapValidation.totalFatura)}). Isso pode ocorrer se a tabela de preços foi alterada após a emissão da fatura. O gráfico foi ajustado ao total da fatura.
+                        </div>
+                    )}
+                    <CostsTreemap data={shippingCostsByStateDataForChart} formatCurrency={formatCurrency} totalLabel="Total Envios (R$)" />
                 </div>
             </div>
             

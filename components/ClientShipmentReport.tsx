@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import type { CobrancaMensal, DetalheEnvio, TabelaPrecoItem } from '../types';
-import { filterCSVByMonth, isDigitalVoucherOrder, calculatePrecoVenda, isTemplateItem, getCostCategoryGroup } from '../services/firestoreService';
+import { filterCSVByMonth, filterCSVByMonthExcludingDigital, isDigitalVoucherOrder, calculatePrecoVenda, isTemplateItem, getCostCategoryGroup, getDisplayDescriptionForPriceItem } from '../services/firestoreService';
 
 interface ClientShipmentReportProps {
     clientCobrancas: CobrancaMensal[];
@@ -187,7 +187,7 @@ const ClientShipmentReport: React.FC<ClientShipmentReportProps> = ({ clientCobra
                 d.rastreio || '',
                 d.estado || '',
                 d.cep || '',
-                item ? `${item.subcategoria} - ${item.descricao}` : 'N/A',
+                item ? `${item.subcategoria} - ${getDisplayDescriptionForPriceItem(item.descricao)}` : 'N/A',
                 d.quantidade.toString(),
                 subtotal.toFixed(2)
             ];
@@ -214,8 +214,8 @@ const ClientShipmentReport: React.FC<ClientShipmentReportProps> = ({ clientCobra
     const handleDownload = () => {
         // FIX: Corrected property name from relatorioEnviosCSV to relatorioRastreioCSV.
         if (!selectedCobranca?.relatorioRastreioCSV) return;
-        // Filter CSV to download only shipments from the invoice month
-        const filteredCSV = filterCSVByMonth(selectedCobranca.relatorioRastreioCSV, selectedCobranca.mesReferencia);
+        // Filter CSV by month and exclude digital/voucher orders (same as on-screen report)
+        const filteredCSV = filterCSVByMonthExcludingDigital(selectedCobranca.relatorioRastreioCSV, selectedCobranca.mesReferencia);
         const blob = new Blob([filteredCSV], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement('a');
         const url = URL.createObjectURL(blob);
@@ -277,10 +277,20 @@ const ClientShipmentReport: React.FC<ClientShipmentReportProps> = ({ clientCobra
             if (!parsed) return [];
             
             const { headers, dataLines, delimiter } = parsed;
-            const possibleUfHeaders = ['uf', 'estado', 'tipo de envio'];
-            const ufHeaderFound = possibleUfHeaders.find(h => headers.includes(h));
-            const ufColumnIndex = ufHeaderFound ? headers.indexOf(ufHeaderFound) : -1;
-        
+            const possibleUfHeaders = ['uf', 'estado', 'state', 'shipping state', 'estado destino', 'estado de destino', 'uf destino', 'destino'];
+            let ufColumnIndex = -1;
+            const exactMatch = possibleUfHeaders.find(h => headers.includes(h));
+            if (exactMatch !== undefined) {
+                ufColumnIndex = headers.indexOf(exactMatch);
+            }
+            if (ufColumnIndex === -1) {
+                const flexMatch = headers.findIndex(h => {
+                    const n = h.trim().toLowerCase();
+                    if (n.includes('billing')) return false;
+                    return n === 'uf' || n === 'state' || n.includes('estado');
+                });
+                if (flexMatch !== -1) ufColumnIndex = flexMatch;
+            }
             if (ufColumnIndex === -1) return [];
             
             // Find columns for digital/voucher filtering
@@ -331,7 +341,7 @@ const ClientShipmentReport: React.FC<ClientShipmentReportProps> = ({ clientCobra
             if (!d.estado || !d.tabelaPrecoItemId) return;
             const item = tabelaPrecos.find(c => c.id === d.tabelaPrecoItemId);
             if (!item) return;
-            const isShippingItem = item.categoria === 'Envios' || item.categoria === 'Retornos';
+            const isShippingItem = getCostCategoryGroup(item.categoria) === 'envio';
             if (!isShippingItem) return;
 
             let estado = d.estado.toUpperCase().trim();
@@ -352,10 +362,30 @@ const ClientShipmentReport: React.FC<ClientShipmentReportProps> = ({ clientCobra
             .sort((a, b) => b.value - a.value);
     }, [selectedCobranca, detalhesByCobrancaId, tabelaPrecos]);
 
+    const estadosAtendidosCount = useMemo(() => {
+        if (shipmentsByStateData.length > 0) return shipmentsByStateData.length;
+        if (reportData.rows.length === 0 || reportData.headers.length === 0) return 0;
+        const stateColIndex = reportData.headers.findIndex(h => {
+            const n = h.trim().toLowerCase();
+            if (n.includes('billing')) return false;
+            return n === 'uf' || n === 'estado' || n === 'state' || n.includes('estado');
+        });
+        if (stateColIndex === -1) return 0;
+        const unique = new Set<string>();
+        reportData.rows.forEach(row => {
+            let v = row[stateColIndex]?.trim().toUpperCase().replace(/"/g, '') || '';
+            if (!v) return;
+            const m = v.match(/\b([A-Z]{2})\b/);
+            const uf = m ? m[1] : v.substring(0, 2);
+            if (uf.length >= 2) unique.add(uf);
+        });
+        return unique.size;
+    }, [shipmentsByStateData.length, reportData.headers, reportData.rows]);
+
     return (
         <div className="bg-white p-6 rounded-lg shadow-md animate-fade-in space-y-6">
              <div>
-                <h3 className="text-xl font-bold text-gray-900">Relatórios de Envio</h3>
+                <h3 className="text-xl font-bold text-gray-900">Relatório de Envios</h3>
                 <p className="text-sm text-gray-500">Consulte os detalhes de envio para cada fatura.</p>
             </div>
             
@@ -399,22 +429,22 @@ const ClientShipmentReport: React.FC<ClientShipmentReportProps> = ({ clientCobra
                     <div>
                         <p className="text-xs text-gray-500 uppercase font-medium">Total de Envios</p>
                         <p className="text-xl font-bold text-blue-700">
-                            {selectedCobranca.quantidadeEnvios !== undefined ? selectedCobranca.quantidadeEnvios : reportData.rows.length}
+                            {selectedCobranca.quantidadeEnviosDisplay ?? selectedCobranca.quantidadeEnvios ?? reportData.rows.length}
                         </p>
                     </div>
                     <div>
                         <p className="text-xs text-gray-500 uppercase font-medium">Valor Total Envios</p>
                         <p className="text-xl font-bold text-gray-800">
-                            {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(selectedCobranca.totalEnvio)}
+                            {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(selectedCobranca.totalEnvio)}
                         </p>
                     </div>
                     <div>
                         <p className="text-xs text-gray-500 uppercase font-medium">Período</p>
-                        <p className="text-lg font-semibold text-gray-700">{selectedCobranca.mesReferencia}</p>
+                        <p className="text-lg font-semibold text-gray-700">{selectedCobranca.periodoCobranca || selectedCobranca.mesReferencia}</p>
                     </div>
                     <div>
                         <p className="text-xs text-gray-500 uppercase font-medium">Estados Atendidos</p>
-                        <p className="text-xl font-bold text-green-700">{shipmentsByStateData.length}</p>
+                        <p className="text-xl font-bold text-green-700">{estadosAtendidosCount}</p>
                     </div>
                 </div>
             )}

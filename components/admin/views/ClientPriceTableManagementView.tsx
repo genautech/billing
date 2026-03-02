@@ -8,7 +8,8 @@ import {
     updateTabelaPrecoCliente,
     deleteTabelaPrecoCliente,
     duplicateTabelaPrecoCliente,
-    getTabelaPrecoCliente
+    getTabelaPrecoCliente,
+    getDisplayDescriptionForPriceItem
 } from '../../../services/firestoreService';
 import type { Cliente, TabelaPrecoItem, TabelaPrecoCliente } from '../../../types';
 import { FileInput } from '../../ui/FileInput';
@@ -385,10 +386,10 @@ const ClientPriceTableManagementView: React.FC = () => {
                                 </tr>
                             </thead>
                             <tbody className="bg-white divide-y divide-gray-200">
-                                {clientes.map(cliente => {
+                                {clientes.map((cliente, cIdx) => {
                                     const tabelaCliente = getTabelaDoCliente(cliente);
                                     return (
-                                        <tr key={cliente.id} className="hover:bg-gray-50">
+                                        <tr key={`cliente-${cIdx}-${cliente.id}`} className="hover:bg-gray-50">
                                             <td className="px-4 py-3 text-sm font-medium text-gray-800">{cliente.nome}</td>
                                             <td className="px-4 py-3 text-sm text-gray-600">
                                                 {tabelaCliente ? (
@@ -505,8 +506,8 @@ const ClientPriceTableManagementView: React.FC = () => {
                                 <tbody className="bg-white divide-y divide-gray-200">
                                     {selectedTabela.itens.length > 0 ? (
                                         selectedTabela.itens.map((item, index) => (
-                                            <tr key={item.id || index} className="hover:bg-gray-50">
-                                                <td className="px-4 py-3 text-sm text-gray-900">{item.descricao}</td>
+                                            <tr key={`item-${index}-${item.id}`} className="hover:bg-gray-50">
+                                                <td className="px-4 py-3 text-sm text-gray-900">{getDisplayDescriptionForPriceItem(item.descricao)}</td>
                                                 <td className="px-4 py-3 text-sm text-gray-600">{item.categoria} / {item.subcategoria}</td>
                                                 <td className="px-4 py-3 text-sm text-gray-600 text-right">
                                                     {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.custoUnitario)}
@@ -602,7 +603,7 @@ const ClientPriceTableManagementView: React.FC = () => {
                             </div>
                             <h3 className="text-lg mt-3 font-medium text-gray-900">Confirmar Exclusão</h3>
                             <p className="mt-2 text-sm text-gray-500">
-                                Tem certeza que deseja excluir o item <strong>{selectedTabela.itens[itemToDeleteIndex]?.descricao}</strong>? Esta ação é permanente.
+                                Tem certeza que deseja excluir o item <strong>{getDisplayDescriptionForPriceItem(selectedTabela.itens[itemToDeleteIndex]?.descricao ?? '')}</strong>? Esta ação é permanente.
                             </p>
                         </div>
                         <div className="bg-gray-50 px-4 py-3 sm:px-6 flex flex-row-reverse rounded-b-lg">
