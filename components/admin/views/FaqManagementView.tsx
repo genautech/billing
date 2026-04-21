@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { addFaqItem, updateFaqItem, deleteFaqItem, seedNotasFiscaisFaqs } from '../../../services/firestoreService';
+import React, { useEffect, useMemo, useState } from 'react';
+import { addFaqItem, updateFaqItem, deleteFaqItem, seedNotasFiscaisFaqs, cleanupDuplicateFaqs } from '../../../services/firestoreService';
 import type { FaqItem } from '../../../types';
 import { useToast } from '../../../contexts/ToastContext';
 import { FormInput } from '../../ui/FormControls';
@@ -13,9 +13,40 @@ const FaqManagementView: React.FC<FaqManagementViewProps> = ({ faqs, onUpdate })
     const [isFormOpen, setIsFormOpen] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isGeneratingNotasFiscais, setIsGeneratingNotasFiscais] = useState(false);
+    const [isCleaningDuplicates, setIsCleaningDuplicates] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
     const [current, setCurrent] = useState<Omit<FaqItem, 'id'>>({ pergunta: '', resposta: '' });
     const [currentId, setCurrentId] = useState<string | null>(null);
     const { addToast } = useToast();
+
+    const filteredFaqs = useMemo(() => {
+        const query = searchQuery.trim().toLowerCase();
+        if (!query) return faqs;
+        return faqs.filter(faq =>
+            faq.pergunta.toLowerCase().includes(query) ||
+            faq.resposta.toLowerCase().includes(query)
+        );
+    }, [faqs, searchQuery]);
+
+    useEffect(() => {
+        const runCleanup = async () => {
+            setIsCleaningDuplicates(true);
+            try {
+                const removedCount = await cleanupDuplicateFaqs();
+                if (removedCount > 0) {
+                    addToast(`${removedCount} pergunta${removedCount > 1 ? 's duplicadas removidas' : ' duplicada removida'} da FAQ.`, 'success');
+                    onUpdate();
+                }
+            } catch (error) {
+                console.error('Error cleaning duplicate FAQs:', error);
+                addToast('Erro ao limpar perguntas duplicadas da FAQ.', 'error');
+            } finally {
+                setIsCleaningDuplicates(false);
+            }
+        };
+
+        runCleanup();
+    }, []);
 
     const handleAddNew = () => {
         setCurrent({ 
@@ -55,7 +86,7 @@ const FaqManagementView: React.FC<FaqManagementViewProps> = ({ faqs, onUpdate })
             onUpdate();
             setIsFormOpen(false);
         } catch (error) {
-            addToast('Erro ao salvar FAQ.', 'error');
+            addToast(error instanceof Error ? error.message : 'Erro ao salvar FAQ.', 'error');
         } finally {
             setIsSubmitting(false);
         }
@@ -83,6 +114,9 @@ const FaqManagementView: React.FC<FaqManagementViewProps> = ({ faqs, onUpdate })
                     <h3 className="text-2xl font-bold text-gray-900">Gestão de FAQ (Ajuda)</h3>
                     <p className="mt-1 text-sm text-gray-600 max-w-2xl">
                         Crie e gerencie as perguntas e respostas que aparecerão na Central de Ajuda do cliente. Use esta seção para esclarecer dúvidas comuns sobre o sistema, faturamento e processos.
+                    </p>
+                    <p className="mt-2 text-xs text-gray-500">
+                        {isCleaningDuplicates ? 'Verificando perguntas duplicadas...' : `${faqs.length} pergunta${faqs.length === 1 ? '' : 's'} ativa${faqs.length === 1 ? '' : 's'} na base.`}
                     </p>
                 </div>
                 <div className="flex gap-2">
@@ -124,8 +158,17 @@ const FaqManagementView: React.FC<FaqManagementViewProps> = ({ faqs, onUpdate })
                     </div>
                 </form>
             )}
+            <div className="relative">
+                <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Buscar pergunta ou resposta..."
+                    className="block w-full rounded-md border border-gray-300 px-4 py-2.5 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+            </div>
             <div className="space-y-4">
-                {faqs.map(faq => (
+                {filteredFaqs.map(faq => (
                     <div key={faq.id} className="p-4 border rounded-lg">
                         <div className="flex justify-between items-start">
                              <h4 className="font-semibold text-gray-800">{faq.pergunta}</h4>
@@ -137,7 +180,7 @@ const FaqManagementView: React.FC<FaqManagementViewProps> = ({ faqs, onUpdate })
                         <p className="mt-2 text-sm text-gray-600 whitespace-pre-wrap">{faq.resposta}</p>
                     </div>
                 ))}
-                 {faqs.length === 0 && <p className="text-center text-gray-500 py-4">Nenhuma pergunta frequente cadastrada.</p>}
+                 {filteredFaqs.length === 0 && <p className="text-center text-gray-500 py-4">{faqs.length === 0 ? 'Nenhuma pergunta frequente cadastrada.' : 'Nenhuma pergunta encontrada para a busca informada.'}</p>}
             </div>
         </div>
     );

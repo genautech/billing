@@ -5,6 +5,7 @@ import {
     getDetalhesByCobrancaId,
     getCustosAdicionaisByCobrancaId,
     getTabelaPrecos,
+    getTabelaPrecosForClientInvoice,
     calculatePrecoVendaForDisplay,
     calculatePrecoVenda,
     isTemplateItem,
@@ -683,8 +684,9 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ clientCobrancas, clie
             try {
                 if (!selectedInvoice) return;
                 
+                if (!client?.id) return;
                 const [precosData, detalhes, custosAdic] = await Promise.all([
-                    getTabelaPrecos(client?.id),
+                    getTabelaPrecosForClientInvoice(client.id),
                     getDetalhesByCobrancaId(selectedInvoice.id),
                     getCustosAdicionaisByCobrancaId(selectedInvoice.id)
                 ]);

@@ -6,9 +6,9 @@ import {
     deleteCobranca,
     salvarCobrancaEditada,
     updateCobrancaStatus,
-    calculatePrecoVenda,
-    calculatePrecoVendaForDisplay,
-    isTemplateItem,
+    getPrecoUnitarioDetalheFatura,
+    getQuantidadeUsoFatura,
+    recalculateCobrancaTotalsFromDetalhes,
     getShareableUrl,
     uploadFileToStorage,
     updateCobrancaWithNotaFiscal,
@@ -179,17 +179,6 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
         });
     };
     
-    // Effective unit price: manual override or calculated from table
-    const getPrecoUnitarioDetalhe = (detalhe: DetalheEnvio, itemPreco: TabelaPrecoItem | undefined): number => {
-        if (!itemPreco) return 0;
-        if (detalhe.precoUnitarioManual != null) return Number(detalhe.precoUnitarioManual);
-        const isShippingItem = itemPreco.categoria === 'Envios' || itemPreco.categoria === 'Retornos';
-        const isTemplate = isTemplateItem(itemPreco);
-        const isNonTemplateShipping = isShippingItem && !isTemplate;
-        if (isNonTemplateShipping) return detalhe.quantidade;
-        return calculatePrecoVendaForDisplay(itemPreco);
-    };
-
     // Group details by category with aggregation
     interface AggregatedItem {
         descricao: string;
@@ -213,11 +202,8 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
             const category = group === 'custosAdicionais' ? 'Custos Adicionais' : group === 'envio' ? 'Envios' : group === 'armazenagem' ? 'Armazenagem' : group === 'logistico' ? 'Logístico' : (itemPreco.categoria || 'Outros');
             if (!grouped[category]) grouped[category] = { items: [], total: 0 };
 
-            const isShippingItem = itemPreco.categoria === 'Envios' || itemPreco.categoria === 'Retornos';
-            const isTemplate = isTemplateItem(itemPreco);
-            const isNonTemplateShipping = isShippingItem && !isTemplate;
-            const quantidadeExibida = isNonTemplateShipping ? 1 : detalhe.quantidade;
-            const precoUnitario = getPrecoUnitarioDetalhe(detalhe, itemPreco);
+            const quantidadeExibida = getQuantidadeUsoFatura(detalhe, itemPreco);
+            const precoUnitario = getPrecoUnitarioDetalheFatura(detalhe, itemPreco);
             const subtotal = precoUnitario * quantidadeExibida;
 
             const displayDesc = getDisplayDescriptionForPriceItem(itemPreco.descricao);
@@ -312,51 +298,17 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
             }
         }
 
-        let totalEnvio = 0;
-        let totalArmazenagem = 0;
-        let totalCustosLogisticos = 0;
-        let totalCustosAdicionaisFromLineItems = 0;
-        let custoTotalItens = 0;
-
-        workingDetalhes.forEach(detalhe => {
-            if (!detalhe.tabelaPrecoItemId) return;
-            const itemPreco = localTabelaPrecos.find(c => c.id === detalhe.tabelaPrecoItemId);
-            if (itemPreco) {
-                const group = detalhe.grupoManual ?? getCostCategoryGroupForItem(itemPreco);
-                const isShippingItem = group === 'envio';
-                const isTemplate = isTemplateItem(itemPreco);
-                const isNonTemplateShipping = isShippingItem && !isTemplate;
-                const precoVendaCalculado = getPrecoUnitarioDetalhe(detalhe, itemPreco);
-                const quantidadeUsada = isNonTemplateShipping ? 1 : (detalhe.quantidade ?? 0);
-                const subtotalVenda = precoVendaCalculado * quantidadeUsada;
-
-                const isPassThrough = isTemplateItem(itemPreco);
-                const subtotalCusto = isPassThrough ? detalhe.quantidade : (isNonTemplateShipping ? detalhe.quantidade : itemPreco.custoUnitario * detalhe.quantidade);
-                custoTotalItens += subtotalCusto;
-
-                if (group === 'custosAdicionais') {
-                    totalCustosAdicionaisFromLineItems += subtotalVenda;
-                } else if (group === 'armazenagem') {
-                    totalArmazenagem += subtotalVenda;
-                } else if (group === 'envio') {
-                    totalEnvio += subtotalVenda;
-                } else {
-                    totalCustosLogisticos += subtotalVenda;
-                }
-            }
-        });
-
-        const custosRegulares = currentCustosAdicionais.filter(c => !c.isReembolso);
         const reembolsos = currentCustosAdicionais.filter(c => c.isReembolso);
-        const totalCustosAdicionaisRegulares = custosRegulares.reduce((sum, custo) => sum + custo.valor, 0);
         const totalReembolsos = reembolsos.reduce((sum, custo) => sum + custo.valor, 0);
-        const totalCustosAdicionais = totalCustosAdicionaisFromLineItems + totalCustosAdicionaisRegulares - totalReembolsos;
 
-        const totalCustosExtras = initialCobranca.totalCustosExtras || 0;
-        const totalEntradaMaterial = cobranca.totalEntradaMaterial ?? 0;
-
-        const custoTotal = custoTotalItens + totalCustosAdicionaisRegulares + totalCustosExtras - totalReembolsos;
-        const valorTotal = totalEnvio + totalArmazenagem + totalCustosLogisticos + totalCustosExtras + totalCustosAdicionais + totalEntradaMaterial;
+        const r = recalculateCobrancaTotalsFromDetalhes(
+            workingDetalhes,
+            currentCustosAdicionais,
+            localTabelaPrecos,
+            initialCobranca.totalCustosExtras || 0,
+            cobranca.totalEntradaMaterial ?? 0
+        );
+        const { totalEnvio, totalArmazenagem, totalCustosLogisticos, totalCustosAdicionais, totalCustosExtras, valorTotal, custoTotal } = r;
 
         if (!forceApplyTotals && totaisEditadosManualmente && !previewOverrideArg) {
             setCobranca(prev => ({
@@ -800,19 +752,27 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
                                     <tbody className="bg-white divide-y divide-gray-200">
                                         {detalhes.map((d, detalheIdx) => {
                                             const itemPreco = localTabelaPrecos.find(c => c.id === d.tabelaPrecoItemId);
-                                            const isShippingItem = itemPreco && (itemPreco.categoria === 'Envios' || itemPreco.categoria === 'Retornos');
-                                            const isTemplate = itemPreco ? isTemplateItem(itemPreco) : false;
-                                            const isNonTemplateShipping = isShippingItem && !isTemplate;
                                             const isPreviewForThis = previewOverride?.detalheIds.includes(d.id);
-                                            let precoUnitario = itemPreco ? getPrecoUnitarioDetalhe(d, itemPreco) : 0;
-                                            let quantidadeExibida = isNonTemplateShipping ? 1 : (d.quantidade ?? 0);
-                                            if (isPreviewForThis && previewOverride) {
-                                                if (previewOverride.field === 'precoUnitarioManual') {
-                                                    precoUnitario = previewOverride.value.trim() === '' ? (itemPreco ? getPrecoUnitarioDetalhe(d, itemPreco) : 0) : (parseFloat(previewOverride.value) || 0);
-                                                } else {
-                                                    quantidadeExibida = isNonTemplateShipping ? 1 : (parseFloat(previewOverride.value) || 0);
-                                                }
-                                            }
+                                            const dPreview: DetalheEnvio = {
+                                                ...d,
+                                                ...(isPreviewForThis && previewOverride?.field === 'quantidade'
+                                                    ? { quantidade: parseFloat(previewOverride.value) || 0 }
+                                                    : {}),
+                                                ...(isPreviewForThis && previewOverride?.field === 'precoUnitarioManual'
+                                                    ? {
+                                                          precoUnitarioManual:
+                                                              previewOverride.value.trim() === ''
+                                                                  ? undefined
+                                                                  : (parseFloat(previewOverride.value) || 0),
+                                                      }
+                                                    : {}),
+                                            };
+                                            const precoUnitario =
+                                                itemPreco != null
+                                                    ? getPrecoUnitarioDetalheFatura(dPreview, itemPreco)
+                                                    : 0;
+                                            const quantidadeExibida =
+                                                itemPreco != null ? getQuantidadeUsoFatura(dPreview, itemPreco) : 0;
                                             const subtotal = precoUnitario * quantidadeExibida;
                                             return (
                                                 <tr key={`detalhe-${detalheIdx}-${d.id}`} className={!d.tabelaPrecoItemId ? 'bg-yellow-50' : ''}>

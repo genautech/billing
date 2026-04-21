@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { getCobrancasMensais, getDetalhesByCobrancaId, getTabelaPrecos, getCustosAdicionaisByCobrancaId, getClientes } from '../services/firestoreService';
+import { getCobrancasMensais, getDetalhesByCobrancaId, getTabelaPrecosForClientInvoice, getCustosAdicionaisByCobrancaId, getClientes } from '../services/firestoreService';
 import type { Cliente, CobrancaMensal, DetalheEnvio, TabelaPrecoItem, CustoAdicional, GeneralSettings, FaqItem } from '../types';
 import ClientBillDetail from './ClientBillDetail';
 import ClientPriceTable from './ClientPriceTable';
@@ -95,7 +95,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ isAdminViewing, authenticat
         const loadPriceTable = async () => {
             if (!currentClient) return;
             try {
-                const precosData = await getTabelaPrecos(currentClient.id);
+                const precosData = await getTabelaPrecosForClientInvoice(currentClient.id);
                 setTabelaPrecos(precosData);
             } catch (error) {
                 console.error("Failed to fetch price table:", error);

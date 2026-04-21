@@ -17,6 +17,61 @@ interface InfographicData {
     estados: string[];
 }
 
+const defaultInfographicData: InfographicData = {
+    steps: [
+        {
+            title: 'Pedido Recebido',
+            description: 'Cliente final faz pedido e o sistema identifica origem e destino.',
+            icon: '📦'
+        },
+        {
+            title: 'Cálculo de Tributação',
+            description: 'O sistema calcula o DIFAL com base nas alíquotas aplicáveis entre os estados.',
+            icon: '🧮'
+        },
+        {
+            title: 'Geração da Nota Fiscal',
+            description: 'A documentação fiscal do envio é preparada com os dados tributários necessários.',
+            icon: '📄'
+        },
+        {
+            title: 'Envio e Fatura',
+            description: 'O envio acontece e o valor correspondente aparece na fatura mensal.',
+            icon: '🚚'
+        }
+    ],
+    difalFlow: {
+        origem: 'Estado de origem da operação logística.',
+        destino: 'Estado de destino do pedido enviado ao cliente final.',
+        calculo: 'Diferença entre as alíquotas interestadual e interna aplicáveis.',
+        aplicacao: 'Cobrança processada automaticamente quando a operação exige DIFAL.'
+    },
+    estados: ['SP', 'RJ', 'MG', 'PR', 'SC']
+};
+
+const sanitizeInfographicData = (rawData: Partial<InfographicData> | null | undefined): InfographicData => {
+    const steps = Array.isArray(rawData?.steps) && rawData.steps.length > 0
+        ? rawData.steps.map(step => ({
+            title: step?.title || 'Etapa do processo',
+            description: step?.description || 'Descrição não informada.',
+            icon: step?.icon || '📄'
+        }))
+        : defaultInfographicData.steps;
+
+    const difalFlow = {
+        origem: rawData?.difalFlow?.origem || defaultInfographicData.difalFlow.origem,
+        destino: rawData?.difalFlow?.destino || defaultInfographicData.difalFlow.destino,
+        calculo: rawData?.difalFlow?.calculo || defaultInfographicData.difalFlow.calculo,
+        aplicacao: rawData?.difalFlow?.aplicacao || defaultInfographicData.difalFlow.aplicacao
+    };
+
+    const estados = Array.isArray(rawData?.estados) && rawData.estados.length > 0
+        ? rawData.estados.filter(Boolean)
+        : defaultInfographicData.estados;
+
+    return { steps, difalFlow, estados };
+};
+
 const TaxationInfographic: React.FC = () => {
     const [data, setData] = useState<InfographicData | null>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -26,9 +81,10 @@ const TaxationInfographic: React.FC = () => {
             setIsLoading(true);
             try {
                 const infographicData = await generateInfographicData();
-                setData(infographicData);
+                setData(sanitizeInfographicData(infographicData));
             } catch (error) {
                 console.error('Error loading infographic data:', error);
+                setData(defaultInfographicData);
             } finally {
                 setIsLoading(false);
             }
@@ -167,4 +223,3 @@ const TaxationInfographic: React.FC = () => {
 };
 
 export default TaxationInfographic;
-

@@ -15,6 +15,85 @@ interface ClientBillingExplanationViewProps {
     cliente?: Cliente;
 }
 
+const summaryCards = [
+    {
+        title: 'Você paga pelo uso real',
+        description: 'Os valores acompanham a operação do mês: envios, armazenagem, entradas e custos adicionais quando aplicáveis.',
+        style: 'border-blue-200 bg-blue-50'
+    },
+    {
+        title: 'Tudo aparece detalhado',
+        description: 'A fatura mostra os itens cobrados de forma separada para facilitar conferência, aprovação e conciliação.',
+        style: 'border-emerald-200 bg-emerald-50'
+    },
+    {
+        title: 'Impostos são tratados no fluxo',
+        description: 'Quando houver DIFAL ou documentos fiscais relacionados, o processo é calculado e processado automaticamente.',
+        style: 'border-amber-200 bg-amber-50'
+    }
+] as const;
+
+const billingPillars = [
+    {
+        icon: '🚚',
+        title: 'Envios',
+        description: 'Cada envio gera cobrança conforme serviço, peso, dimensões, destino e regras da tabela aplicada.'
+    },
+    {
+        icon: '📦',
+        title: 'Armazenagem',
+        description: 'A cobrança considera o espaço ocupado ou a estrutura utilizada no período, conforme a configuração contratada.'
+    },
+    {
+        icon: '🧾',
+        title: 'Custos adicionais',
+        description: 'Incluem itens como DIFAL, seguro, retornos, manuseios extras e outras ocorrências do mês.'
+    }
+] as const;
+
+const howItWorksSteps = [
+    { title: '1. Operação do mês', description: 'Pedidos, movimentações e armazenagem são registrados ao longo do período.' },
+    { title: '2. Consolidação da cobrança', description: 'Os eventos do mês são agrupados e transformados em uma fatura detalhada.' },
+    { title: '3. Documentos fiscais', description: 'Quando necessário, notas e tributos são gerados dentro do fluxo operacional.' },
+    { title: '4. Conferência e pagamento', description: 'Você visualiza os detalhes, baixa os arquivos e valida a cobrança com mais clareza.' }
+] as const;
+
+const transparencyHighlights = [
+    {
+        title: 'Nota fiscal vinculada ao envio',
+        description: 'Quando o pedido exige documentação fiscal, o registro acompanha a operação e pode ser consultado depois.'
+    },
+    {
+        title: 'DIFAL tratado automaticamente',
+        description: 'O sistema identifica a necessidade, calcula o valor e inclui o custo correspondente na cobrança mensal.'
+    },
+    {
+        title: 'Rastreabilidade para conferência',
+        description: 'Os valores ficam organizados para facilitar auditoria, entendimento e alinhamento com o financeiro.'
+    }
+] as const;
+
+const LoadingBlock: React.FC<{ message: string }> = ({ message }) => (
+    <div className="text-center text-gray-500 py-8">
+        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        <p className="mt-2">{message}</p>
+    </div>
+);
+
+const InfoSection: React.FC<{
+    title: string;
+    description?: string;
+    children: React.ReactNode;
+}> = ({ title, description, children }) => (
+    <section className="bg-white p-6 rounded-lg shadow-md space-y-5">
+        <div>
+            <h3 className="text-2xl font-bold text-gray-900">{title}</h3>
+            {description && <p className="mt-2 text-sm text-gray-600 max-w-3xl">{description}</p>}
+        </div>
+        {children}
+    </section>
+);
+
 const ClientBillingExplanationView: React.FC<ClientBillingExplanationViewProps> = ({ cliente }) => {
     const [billingExplanation, setBillingExplanation] = useState<string>('');
     const [difalExplanation, setDifalExplanation] = useState<string>('');
@@ -137,7 +216,6 @@ const ClientBillingExplanationView: React.FC<ClientBillingExplanationViewProps> 
 
     return (
         <div className="space-y-6 animate-fade-in">
-            {/* PDF Export Button */}
             <div className="bg-white p-4 rounded-lg shadow-md flex justify-end">
                 <button 
                     onClick={handleGeneratePDF} 
@@ -152,189 +230,126 @@ const ClientBillingExplanationView: React.FC<ClientBillingExplanationViewProps> 
             </div>
 
             <div ref={pdfContentRef}>
-            {/* Seção: Cobranças Mensais */}
-            <div className="bg-white p-6 rounded-lg shadow-md">
-                <h3 className="text-2xl font-bold text-gray-900 mb-4">Como Funcionam as Cobranças Mensais</h3>
-                {isLoadingBilling ? (
-                    <div className="text-center text-gray-500 py-8">
-                        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                        <p className="mt-2">Gerando conteúdo explicativo...</p>
+                <section className="bg-gradient-to-r from-slate-900 via-blue-900 to-cyan-800 rounded-lg shadow-md text-white p-6">
+                    <div className="max-w-4xl">
+                        <p className="text-sm uppercase tracking-[0.2em] text-blue-100">Como Funciona</p>
+                        <h2 className="mt-2 text-3xl font-bold">Entenda a cobrança sem precisar interpretar a operação inteira</h2>
+                        <p className="mt-3 text-sm text-blue-50">
+                            Esta área resume como a Yoobe consolida custos, trata notas fiscais e apresenta tudo de forma conferível na sua fatura mensal.
+                        </p>
+                        {cliente?.nome && (
+                            <p className="mt-4 inline-flex rounded-full bg-white/10 px-3 py-1 text-sm text-white/90">
+                                Cliente: {cliente.nome}
+                            </p>
+                        )}
                     </div>
-                ) : (
-                    <div className="bg-gradient-to-br from-gray-50 to-white rounded-lg p-6 border border-gray-200">
-                        <MarkdownRenderer content={billingExplanation} />
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+                        {summaryCards.map(card => (
+                            <div key={card.title} className={`rounded-lg border p-4 ${card.style} text-gray-900`}>
+                                <h3 className="font-semibold">{card.title}</h3>
+                                <p className="mt-2 text-sm text-gray-700">{card.description}</p>
+                            </div>
+                        ))}
                     </div>
-                )}
+                </section>
 
-                {/* Cards informativos sobre os três tipos de cobrança */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-                    <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4">
-                        <div className="text-3xl mb-2">🚚</div>
-                        <h4 className="font-semibold text-gray-800 mb-2">Cobranças de Envios</h4>
-                        <p className="text-sm text-gray-600">
-                            Custos de frete calculados por peso, dimensões e localidade de entrega. Cada etiqueta de envio gerada representa uma cobrança.
+                <InfoSection
+                    title="Visão rápida do processo"
+                    description="A lógica abaixo resume a jornada da cobrança do início da operação até a fatura final."
+                >
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                        {howItWorksSteps.map(step => (
+                            <div key={step.title} className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                                <h4 className="font-semibold text-gray-900">{step.title}</h4>
+                                <p className="mt-2 text-sm text-gray-600">{step.description}</p>
+                            </div>
+                        ))}
+                    </div>
+                </InfoSection>
+
+                <InfoSection
+                    title="Como as cobranças são montadas"
+                    description="Primeiro os custos são classificados por tipo para que a leitura da fatura fique mais simples."
+                >
+                    {isLoadingBilling ? (
+                        <LoadingBlock message="Gerando conteúdo explicativo..." />
+                    ) : (
+                        <div className="bg-gradient-to-br from-gray-50 to-white rounded-lg p-6 border border-gray-200">
+                            <MarkdownRenderer content={billingExplanation} />
+                        </div>
+                    )}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {billingPillars.map(item => (
+                            <div key={item.title} className="rounded-lg border border-gray-200 bg-white p-4">
+                                <div className="text-3xl">{item.icon}</div>
+                                <h4 className="mt-3 font-semibold text-gray-900">{item.title}</h4>
+                                <p className="mt-2 text-sm text-gray-600">{item.description}</p>
+                            </div>
+                        ))}
+                    </div>
+                </InfoSection>
+
+                <InfoSection
+                    title="DIFAL e tributação"
+                    description="Quando há diferença de alíquota entre estados, o processo fiscal entra no fluxo de forma automática."
+                >
+                    {isLoadingDifal ? (
+                        <LoadingBlock message="Gerando explicação sobre DIFAL..." />
+                    ) : (
+                        <div className="bg-gradient-to-br from-blue-50 to-white rounded-lg p-6 border border-blue-200">
+                            <MarkdownRenderer content={difalExplanation} />
+                        </div>
+                    )}
+                    <TaxationInfographic />
+                </InfoSection>
+
+                <InfoSection
+                    title="Notas fiscais no envio"
+                    description="Aqui está a parte mais operacional do processo, organizada em fluxo e depois em exemplos visuais."
+                >
+                    {isLoadingProcessoNotasFiscais ? (
+                        <LoadingBlock message="Gerando explicação do processo..." />
+                    ) : (
+                        <div className="bg-gradient-to-br from-gray-50 to-white rounded-lg p-6 border border-gray-200">
+                            <MarkdownRenderer content={processoNotasFiscaisExplanation} />
+                        </div>
+                    )}
+                    <ProcessoNotasFiscaisFlow />
+                    <div className="mt-2">
+                        <NotaFiscalModelViewer />
+                    </div>
+                </InfoSection>
+
+                <InfoSection
+                    title="O que você consegue conferir com facilidade"
+                    description="Em vez de navegar por textos longos, use estes pontos como referência ao validar a fatura."
+                >
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {transparencyHighlights.map(item => (
+                            <div key={item.title} className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                                <h4 className="font-semibold text-gray-900">{item.title}</h4>
+                                <p className="mt-2 text-sm text-gray-600">{item.description}</p>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+                        <p className="text-sm text-blue-900">
+                            O objetivo desta área é reduzir dúvida operacional. Para simular valores, conferir cenários e entender impactos no cálculo, use a calculadora abaixo.
                         </p>
                     </div>
-                    <div className="bg-green-50 border-2 border-green-200 rounded-lg p-4">
-                        <div className="text-3xl mb-2">📦</div>
-                        <h4 className="font-semibold text-gray-800 mb-2">Cobranças de Armazenagem</h4>
-                        <p className="text-sm text-gray-600">
-                            Custo para manter produtos em estoque seguro. Calculado por espaço ocupado (pallets, bins, prateleiras) ou por unidade.
-                        </p>
-                    </div>
-                    <div className="bg-purple-50 border-2 border-purple-200 rounded-lg p-4">
-                        <div className="text-3xl mb-2">➕</div>
-                        <h4 className="font-semibold text-gray-800 mb-2">Cobranças de Adicionais</h4>
-                        <p className="text-sm text-gray-600">
-                            Custos extras como DIFAL, seguro de envio, taxas de manuseio ou custos de devolução. Detalhados na fatura quando aplicáveis.
-                        </p>
-                    </div>
+                </InfoSection>
+
+                <CostCalculator cliente={cliente} />
+
+                <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-6 mt-6">
+                    <h4 className="font-semibold text-blue-900 mb-2">Resumo final</h4>
+                    <p className="text-blue-800 text-sm">
+                        A intenção desta área é deixar o processo mais objetivo: o que aconteceu no mês, como isso vira cobrança e onde cada valor pode ser conferido.
+                    </p>
                 </div>
-            </div>
-
-            {/* Seção: DIFAL e Tributação */}
-            <div className="bg-white p-6 rounded-lg shadow-md">
-                <h3 className="text-2xl font-bold text-gray-900 mb-4">DIFAL e Tributação</h3>
-                {isLoadingDifal ? (
-                    <div className="text-center text-gray-500 py-8">
-                        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                        <p className="mt-2">Gerando explicação sobre DIFAL...</p>
-                    </div>
-                ) : (
-                    <div className="bg-gradient-to-br from-blue-50 to-white rounded-lg p-6 border border-blue-200 mb-6">
-                        <MarkdownRenderer content={difalExplanation} />
-                    </div>
-                )}
-
-                {/* Infográfico */}
-                <TaxationInfographic />
-            </div>
-
-            {/* Seção: Processo de Emissão de Notas Fiscais no Envio */}
-            <div className="bg-white p-6 rounded-lg shadow-md">
-                <h3 className="text-2xl font-bold text-gray-900 mb-4">Processo de Emissão de Notas Fiscais no Envio</h3>
-                
-                {isLoadingProcessoNotasFiscais ? (
-                    <div className="text-center text-gray-500 py-8">
-                        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                        <p className="mt-2">Gerando explicação do processo...</p>
-                    </div>
-                ) : (
-                    <div className="bg-gradient-to-br from-gray-50 to-white rounded-lg p-6 border border-gray-200 mb-6">
-                        <MarkdownRenderer content={processoNotasFiscaisExplanation} />
-                    </div>
-                )}
-
-                {/* Fluxo Visual */}
-                <ProcessoNotasFiscaisFlow />
-
-                {/* Modelos de Notas Fiscais */}
-                <div className="mt-6">
-                    <NotaFiscalModelViewer />
-                </div>
-            </div>
-
-            {/* Seção: Transparência no Processo */}
-            <div className="bg-white p-6 rounded-lg shadow-md">
-                <h3 className="text-2xl font-bold text-gray-900 mb-4">Transparência no Processo de Envio</h3>
-                <div className="space-y-4">
-                    <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                        <h4 className="font-semibold text-gray-800 mb-2 flex items-center">
-                            <span className="mr-2">📄</span>
-                            Nota Fiscal de Envio
-                        </h4>
-                        <p className="text-gray-700 text-sm">
-                            Cada pedido enviado inclui uma nota fiscal completa que detalha todos os custos, incluindo o DIFAL calculado automaticamente. 
-                            A nota fiscal é gerada no momento do envio e está disponível para download e consulta.
-                        </p>
-                    </div>
-
-                    <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                        <h4 className="font-semibold text-gray-800 mb-2 flex items-center">
-                            <span className="mr-2">🧮</span>
-                            Geração e Pagamento Automático do DIFAL
-                        </h4>
-                        <p className="text-gray-700 text-sm">
-                            O DIFAL é calculado automaticamente pelo sistema baseado na origem (nossa localização) e destino (CEP do cliente final). 
-                            O cálculo considera as alíquotas de ICMS de ambos os estados e aplica a diferença quando necessário.
-                        </p>
-                        <p className="text-gray-700 text-sm mt-2">
-                            <strong>Pagamento Automático:</strong> O valor do DIFAL é automaticamente cobrado e pago pela Yoobe utilizando um gateway de pagamento integrado. 
-                            O sistema cobra uma taxa fixa que é depois cobrada na fatura mensal, de acordo com a tabela de preços. 
-                            Não é necessário nenhuma ação pela empresa cliente - todo o processo é automatizado.
-                        </p>
-                    </div>
-
-                    <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                        <h4 className="font-semibold text-gray-800 mb-2 flex items-center">
-                            <span className="mr-2">📊</span>
-                            Rastreabilidade Completa
-                        </h4>
-                        <p className="text-gray-700 text-sm">
-                            Na sua fatura mensal, você pode ver exatamente quanto foi cobrado de DIFAL em cada pedido, 
-                            facilitando a conciliação contábil e o entendimento dos custos. Todos os valores são transparentes e auditáveis.
-                        </p>
-                    </div>
-                </div>
-
-                {/* Fluxo visual do processo */}
-                <div className="mt-6 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg p-6 border-2 border-blue-200 shadow-sm">
-                    <h4 className="font-semibold text-gray-800 mb-6 text-lg">Fluxo do Processo</h4>
-                    <div className="flex flex-col md:flex-row items-center justify-between space-y-4 md:space-y-0 md:space-x-3 lg:space-x-4">
-                        <div className="flex-1 text-center w-full">
-                            <div className="bg-white rounded-lg p-5 border-2 border-blue-300 shadow-sm hover:shadow-md transition-shadow">
-                                <div className="text-4xl mb-3">📦</div>
-                                <p className="text-sm font-semibold text-gray-800">Pedido Recebido</p>
-                            </div>
-                        </div>
-                        <div className="text-blue-500 text-3xl font-bold hidden md:block">→</div>
-                        <div className="flex-1 text-center w-full">
-                            <div className="bg-white rounded-lg p-5 border-2 border-blue-300 shadow-sm hover:shadow-md transition-shadow">
-                                <div className="text-4xl mb-3">🧮</div>
-                                <p className="text-sm font-semibold text-gray-800">DIFAL Calculado</p>
-                            </div>
-                        </div>
-                        <div className="text-blue-500 text-3xl font-bold hidden md:block">→</div>
-                        <div className="flex-1 text-center w-full">
-                            <div className="bg-white rounded-lg p-5 border-2 border-blue-300 shadow-sm hover:shadow-md transition-shadow">
-                                <div className="text-4xl mb-3">📄</div>
-                                <p className="text-sm font-semibold text-gray-800">Nota Fiscal Gerada</p>
-                            </div>
-                        </div>
-                        <div className="text-blue-500 text-3xl font-bold hidden md:block">→</div>
-                        <div className="flex-1 text-center w-full">
-                            <div className="bg-white rounded-lg p-5 border-2 border-green-300 shadow-sm hover:shadow-md transition-shadow">
-                                <div className="text-4xl mb-3">🚚</div>
-                                <p className="text-sm font-semibold text-gray-800">Envio Realizado</p>
-                            </div>
-                        </div>
-                        <div className="text-green-500 text-3xl font-bold hidden md:block">→</div>
-                        <div className="flex-1 text-center w-full">
-                            <div className="bg-white rounded-lg p-5 border-2 border-green-300 shadow-sm hover:shadow-md transition-shadow">
-                                <div className="text-4xl mb-3">📊</div>
-                                <p className="text-sm font-semibold text-gray-800">Na Fatura Mensal</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* Seção: Calculadora de Custos */}
-            <CostCalculator cliente={cliente} />
-
-            {/* Informação Final */}
-            <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-6">
-                <h4 className="font-semibold text-blue-900 mb-2">💡 Informação Importante</h4>
-                <p className="text-blue-800 text-sm">
-                    Esta área foi criada para esclarecer aos departamentos de compras como funcionam nossas cobranças. 
-                    Todos os valores são calculados de forma transparente e aparecem detalhadamente em suas faturas mensais. 
-                    Se tiver dúvidas, entre em contato conosco através do portal de ajuda.
-                </p>
-            </div>
             </div>
         </div>
     );
 };
 
 export default ClientBillingExplanationView;
-

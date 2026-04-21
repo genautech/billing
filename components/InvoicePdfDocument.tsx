@@ -1,6 +1,11 @@
 import React, { useRef, useImperativeHandle, useMemo, forwardRef } from 'react';
 import type { CobrancaMensal, DetalheEnvio, TabelaPrecoItem, Cliente, CustoAdicional } from '../types';
-import { calculatePrecoVenda, calculatePrecoVendaForDisplay, isTemplateItem, getDisplayDescriptionForPriceItem } from '../services/firestoreService';
+import {
+    getPrecoUnitarioDetalheFatura,
+    getQuantidadeUsoFatura,
+    getDisplayDescriptionForPriceItem,
+    createFindItemPreco,
+} from '../services/firestoreService';
 
 declare const jspdf: any;
 declare const html2canvas: any;
@@ -53,31 +58,10 @@ const InvoicePdfDocument = forwardRef<InvoicePdfDocumentRef, InvoicePdfDocumentP
     ) => {
         const pdfTemplateRef = useRef<HTMLDivElement>(null);
 
-        const getPrecoItemInfo = (id: string | null): TabelaPrecoItem | undefined =>
-            id ? tabelaPrecos.find(p => p.id === id) : undefined;
+        const findItemPreco = useMemo(() => createFindItemPreco(tabelaPrecos), [tabelaPrecos]);
 
-        const getPrecoUnitarioDetalhe = (detalhe: DetalheEnvio, itemPreco: TabelaPrecoItem | undefined): number => {
-            if (!itemPreco) return 0;
-            if (detalhe.precoUnitarioManual != null) return Number(detalhe.precoUnitarioManual);
-            const isShippingItem = itemPreco.categoria === 'Envios' || itemPreco.categoria === 'Retornos';
-            const isDifalItem = itemPreco.categoria === 'Difal' || itemPreco.descricao?.toLowerCase().includes('difal');
-            const isTemplate = isTemplateItem(itemPreco);
-            const DIFAL_MIN_PRICE = 3.0;
-            if (isDifalItem)
-                return Math.max(calculatePrecoVenda(itemPreco, detalhe.quantidade), DIFAL_MIN_PRICE);
-            if (isTemplate || isShippingItem || isDifalItem)
-                return calculatePrecoVenda(itemPreco, detalhe.quantidade);
-            return calculatePrecoVendaForDisplay(itemPreco);
-        };
-
-        const getQuantidadeExibida = (detalhe: DetalheEnvio, itemPreco: TabelaPrecoItem | undefined): number => {
-            if (!itemPreco) return 0;
-            const isShippingItem = itemPreco.categoria === 'Envios' || itemPreco.categoria === 'Retornos';
-            const isTemplate = isTemplateItem(itemPreco);
-            const isDifalItem = itemPreco.categoria === 'Difal' || itemPreco.descricao?.toLowerCase().includes('difal');
-            if (isDifalItem || (isShippingItem && !isTemplate)) return 1;
-            return detalhe.quantidade;
-        };
+        const getPrecoItemInfo = (id: string | null, context?: { codigoPedido?: string; quantidade?: number }): TabelaPrecoItem | undefined =>
+            id ? findItemPreco(id, context) : undefined;
 
         const categoryTotals = useMemo(() => {
             const totals: Record<string, number> = {
@@ -100,7 +84,10 @@ const InvoicePdfDocument = forwardRef<InvoicePdfDocumentRef, InvoicePdfDocumentP
 
         const filteredDetalhes = useMemo(() => {
             return detalhes.filter(detalhe => {
-                const itemPreco = getPrecoItemInfo(detalhe.tabelaPrecoItemId);
+                const itemPreco = findItemPreco(detalhe.tabelaPrecoItemId, {
+                    codigoPedido: detalhe.codigoPedido,
+                    quantidade: detalhe.quantidade,
+                });
                 if (!itemPreco) return true;
                 const isShippingItem = itemPreco.categoria === 'Envios' || itemPreco.categoria === 'Retornos';
                 if (isShippingItem) return true;
@@ -109,12 +96,10 @@ const InvoicePdfDocument = forwardRef<InvoicePdfDocumentRef, InvoicePdfDocumentP
                 const isDifalItem =
                     itemPreco.categoria === 'Difal' || itemPreco.descricao?.toLowerCase().includes('difal');
                 if (isDifalItem) return true;
-                if (isTemplateItem(itemPreco)) return false;
                 if (itemPreco.categoria === 'Custos Internos') return false;
-                if (itemPreco.descricao?.includes('(TP)')) return false;
                 return true;
             });
-        }, [detalhes, tabelaPrecos]);
+        }, [detalhes, findItemPreco]);
 
         useImperativeHandle(ref, () => ({
             generatePdf: async (suggestedFileName?: string) => {
@@ -306,10 +291,13 @@ const InvoicePdfDocument = forwardRef<InvoicePdfDocumentRef, InvoicePdfDocumentP
                             </thead>
                             <tbody className="divide-y divide-gray-100">
                                 {filteredDetalhes.map((detalhe, di) => {
-                                    const itemPreco = getPrecoItemInfo(detalhe.tabelaPrecoItemId);
+                                    const itemPreco = getPrecoItemInfo(detalhe.tabelaPrecoItemId, {
+                                        codigoPedido: detalhe.codigoPedido,
+                                        quantidade: detalhe.quantidade,
+                                    });
                                     if (!itemPreco) return null;
-                                    const precoUnitario = getPrecoUnitarioDetalhe(detalhe, itemPreco);
-                                    const quantidadeExibida = getQuantidadeExibida(detalhe, itemPreco);
+                                    const precoUnitario = getPrecoUnitarioDetalheFatura(detalhe, itemPreco);
+                                    const quantidadeExibida = getQuantidadeUsoFatura(detalhe, itemPreco);
                                     const subtotal = precoUnitario * quantidadeExibida;
                                     return (
                                         <tr key={`detalhe-${di}-${detalhe.id}`}>
@@ -439,15 +427,16 @@ const InvoicePdfDocument = forwardRef<InvoicePdfDocumentRef, InvoicePdfDocumentP
                                     {filteredDetalhes
                                         .filter(d => d.codigoPedido === 'ENTRADA DE MATERIAL')
                                         .map((detalhe, di) => {
-                                            const itemPreco = getPrecoItemInfo(detalhe.tabelaPrecoItemId);
-                                            const precoUnitario = getPrecoUnitarioDetalhe(
-                                                detalhe,
-                                                itemPreco
-                                            );
-                                            const quantidadeExibida = getQuantidadeExibida(
-                                                detalhe,
-                                                itemPreco
-                                            );
+                                            const itemPreco = getPrecoItemInfo(detalhe.tabelaPrecoItemId, {
+                                                codigoPedido: detalhe.codigoPedido,
+                                                quantidade: detalhe.quantidade,
+                                            });
+                                            const precoUnitario = itemPreco
+                                                ? getPrecoUnitarioDetalheFatura(detalhe, itemPreco)
+                                                : 0;
+                                            const quantidadeExibida = itemPreco
+                                                ? getQuantidadeUsoFatura(detalhe, itemPreco)
+                                                : 0;
                                             const subtotal = precoUnitario * quantidadeExibida;
                                             return (
                                                 <tr key={`detalhe-entrada-${di}-${detalhe.id}`}>

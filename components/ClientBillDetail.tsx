@@ -2,7 +2,7 @@ import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { ResponsiveContainer, PieChart as RechartsPieChart, Pie, Cell, Tooltip } from 'recharts';
 import type { CobrancaMensal, DetalheEnvio, TabelaPrecoItem, Cliente, CustoAdicional, DocumentoPedido, GeneralSettings, ComprovanteDifal } from '../types';
 // FIX: Corrected import path
-import { generateClientInvoiceAnalysis, confirmarRecebimentoFatura, calculatePrecoVenda, calculatePrecoVendaForDisplay, isTemplateItem, getCostCategoryGroupForItem, getDisplayDescriptionForPriceItem, getDocumentosByCobrancaId, getGeneralSettings, createFindItemPreco } from '../services/firestoreService';
+import { generateClientInvoiceAnalysis, confirmarRecebimentoFatura, getPrecoUnitarioDetalheFatura, getQuantidadeUsoFatura, getDetalheInvoiceGroup, getInvoiceGroupDisplayLabel, getDisplayDescriptionForPriceItem, sortInvoiceGroupLabels, getDocumentosByCobrancaId, getGeneralSettings, createFindItemPreco } from '../services/firestoreService';
 import { generateCicloNotaFiscalExplanation } from '../services/geminiContentService';
 import { useToast } from '../contexts/ToastContext';
 import MarkdownRenderer from './MarkdownRenderer';
@@ -243,7 +243,7 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
     const handleExportCSV = () => {
         const headers = ['Data', 'Rastreio', 'CodigoPedido', 'Categoria', 'Subcategoria', 'Servico', 'Quantidade', 'PrecoUnitario', 'Subtotal'];
         const rows = detalhes.map(detalhe => {
-            const itemPreco = getPrecoItemInfo(detalhe.tabelaPrecoItemId);
+            const itemPreco = getPrecoItemInfoForDetalhe(detalhe);
             if (!itemPreco) {
                 return [
                     formatDate(detalhe.data),
@@ -335,7 +335,12 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
             .sort(([, a], [, b]) => Math.abs(b) - Math.abs(a));
             
     }, [cobranca, custosAdicionais]);
-    
+
+    const totalCustosAdicionaisFirestore = useMemo(
+        () => custosAdicionais.filter(c => !c.isReembolso).reduce((sum, c) => sum + c.valor, 0),
+        [custosAdicionais]
+    );
+
     const costPerOrderAnalysis = useMemo(() => {
         const uniqueOrders = new Set(detalhes.map(d => d.codigoPedido).filter(id => id && id !== 'ARMAZENAGEM'));
         const orderCount = uniqueOrders.size;
@@ -346,30 +351,24 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
     // Resolve price item by ID with fallback for unknown/obsolete IDs (shared with dashboard)
     const findItemPreco = useMemo(() => createFindItemPreco(tabelaPrecos), [tabelaPrecos]);
 
-    // Helper function using findItemPreco with fallback (without context)
-    const getPrecoItemInfo = (id: string | null, context?: { codigoPedido?: string; quantidade?: number }) => 
+    const getPrecoItemInfo = (id: string | null, context?: { codigoPedido?: string; quantidade?: number }) =>
         id ? findItemPreco(id, context) : undefined;
 
-    // Effective unit price: manual override or calculated from table (used for client display)
+    /** Resolver item da tabela com o mesmo contexto do recálculo da fatura (IDs legados / fallback Difal). */
+    const getPrecoItemInfoForDetalhe = (detalhe: DetalheEnvio) =>
+        getPrecoItemInfo(detalhe.tabelaPrecoItemId, {
+            codigoPedido: detalhe.codigoPedido,
+            quantidade: detalhe.quantidade,
+        });
+
     const getPrecoUnitarioDetalhe = (detalhe: DetalheEnvio, itemPreco: TabelaPrecoItem | undefined): number => {
         if (!itemPreco) return 0;
-        if (detalhe.precoUnitarioManual != null) return Number(detalhe.precoUnitarioManual);
-        const isShippingItem = itemPreco.categoria === 'Envios' || itemPreco.categoria === 'Retornos';
-        const isDifalItem = itemPreco.categoria === 'Difal' || itemPreco.descricao?.toLowerCase().includes('difal');
-        const isTemplate = isTemplateItem(itemPreco);
-        const DIFAL_MIN_PRICE = 3.00;
-        if (isDifalItem) return Math.max(calculatePrecoVenda(itemPreco, detalhe.quantidade), DIFAL_MIN_PRICE);
-        if (isTemplate || isShippingItem || isDifalItem) return calculatePrecoVenda(itemPreco, detalhe.quantidade);
-        return calculatePrecoVendaForDisplay(itemPreco);
+        return getPrecoUnitarioDetalheFatura(detalhe, itemPreco);
     };
 
     const getQuantidadeExibida = (detalhe: DetalheEnvio, itemPreco: TabelaPrecoItem | undefined): number => {
         if (!itemPreco) return 0;
-        const isShippingItem = itemPreco.categoria === 'Envios' || itemPreco.categoria === 'Retornos';
-        const isTemplate = isTemplateItem(itemPreco);
-        const isDifalItem = itemPreco.categoria === 'Difal' || itemPreco.descricao?.toLowerCase().includes('difal');
-        if (isDifalItem || (isShippingItem && !isTemplate)) return 1;
-        return detalhe.quantidade;
+        return getQuantidadeUsoFatura(detalhe, itemPreco);
     };
 
     // Extract storage breakdown from invoice details for transparent display
@@ -393,49 +392,30 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
     }, [detalhes, findItemPreco]);
 
     // Filter out internal costs but KEEP shipping items (even if template) for display
+    // Mesmas linhas que entram no total da fatura (recalculateCobrancaTotalsFromDetalhes), exceto custos só internos
     const filteredDetalhes = useMemo(() => {
-        console.log('🔍 ClientBillDetail - Total detalhes recebidos:', detalhes.length);
-        console.log('🔍 ClientBillDetail - Primeiros 3 detalhes:', detalhes.slice(0, 3));
-        console.log('🔍 ClientBillDetail - TabelaPrecos count:', tabelaPrecos.length);
-        
-        const filtered = detalhes.filter(detalhe => {
-            const itemPreco = findItemPreco(detalhe.tabelaPrecoItemId, { 
-                codigoPedido: detalhe.codigoPedido, 
-                quantidade: detalhe.quantidade 
+        return detalhes.filter(detalhe => {
+            const itemPreco = findItemPreco(detalhe.tabelaPrecoItemId, {
+                codigoPedido: detalhe.codigoPedido,
+                quantidade: detalhe.quantidade
             });
-            if (!itemPreco) {
-                console.log('❌ Item não encontrado na tabela para ID:', detalhe.tabelaPrecoItemId);
-                return true; // Keep items without price table match
-            }
-            
-            // Always keep shipping items (Envios, Retornos) - they need to be displayed
+            if (!itemPreco) return true;
+
             const isShippingItem = itemPreco.categoria === 'Envios' || itemPreco.categoria === 'Retornos';
             if (isShippingItem) return true;
-            
-            // Always keep storage items (Armazenamento/Armazenagem)
+
             const catLower = itemPreco.categoria.toLowerCase();
             if (catLower.includes('armazenamento') || catLower.includes('armazenagem')) return true;
-            
-            // Always keep DIFAL items - they should appear on client invoice
-            const isDifalItem = itemPreco.categoria === 'Difal' || 
-                itemPreco.descricao?.toLowerCase().includes('difal');
+
+            const isDifalItem =
+                itemPreco.categoria === 'Difal' || itemPreco.descricao?.toLowerCase().includes('difal');
             if (isDifalItem) return true;
-            
-            // Filter out templates for non-essential items
-            if (isTemplateItem(itemPreco)) return false;
-            
-            // Filter out "Custos Internos" category (except DIFAL which was already kept)
+
             if (itemPreco.categoria === 'Custos Internos') return false;
-            
-            // Filter out items with "(TP)" in description (except shipping/DIFAL which were already kept)
-            if (itemPreco.descricao && itemPreco.descricao.includes('(TP)')) return false;
-            
+
             return true;
         });
-        
-        console.log('🔍 ClientBillDetail - Detalhes após filtro:', filtered.length);
-        return filtered;
-    }, [detalhes, tabelaPrecos]);
+    }, [detalhes, findItemPreco]);
 
     // Group details by order code and then by category (using filtered details)
     const groupedByOrder = useMemo(() => {
@@ -447,8 +427,10 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                 codigoPedido: detalhe.codigoPedido, 
                 quantidade: detalhe.quantidade 
             });
-            const category = itemPreco?.categoria || 'Outros';
-            
+            const category = itemPreco
+                ? getInvoiceGroupDisplayLabel(getDetalheInvoiceGroup(detalhe, itemPreco))
+                : 'Outros';
+
             if (!grouped[orderCode]) {
                 grouped[orderCode] = {};
             }
@@ -464,32 +446,25 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
     // Calculate totals for each order
     const orderTotals = useMemo(() => {
         const totals: Record<string, number> = {};
-        let debugCount = 0;
-        
+
         Object.entries(groupedByOrder).forEach(([orderCode, categories]) => {
             let orderTotal = 0;
-            Object.values(categories).flat().forEach(detalhe => {
-                const itemPreco = findItemPreco(detalhe.tabelaPrecoItemId, { 
-                    codigoPedido: detalhe.codigoPedido, 
-                    quantidade: detalhe.quantidade 
+            Object.values(categories)
+                .flat()
+                .forEach(detalhe => {
+                    const itemPreco = findItemPreco(detalhe.tabelaPrecoItemId, {
+                        codigoPedido: detalhe.codigoPedido,
+                        quantidade: detalhe.quantidade,
+                    });
+                    if (!itemPreco) return;
+
+                    const precoUnitario = getPrecoUnitarioDetalhe(detalhe, itemPreco);
+                    const quantidadeExibida = getQuantidadeExibida(detalhe, itemPreco);
+                    orderTotal += precoUnitario * quantidadeExibida;
                 });
-                if (!itemPreco) {
-                    if (debugCount < 3) console.log('❌ orderTotals - Item não encontrado:', detalhe.tabelaPrecoItemId);
-                    return;
-                }
-                
-                const precoUnitario = getPrecoUnitarioDetalhe(detalhe, itemPreco);
-                const quantidadeExibida = getQuantidadeExibida(detalhe, itemPreco);
-                const subtotal = precoUnitario * quantidadeExibida;
-                debugCount++;
-                orderTotal += subtotal;
-            });
             totals[orderCode] = orderTotal;
         });
-        
-        console.log('📊 orderTotals - Totais calculados:', Object.keys(totals).length, 'pedidos');
-        console.log('📊 orderTotals - Primeiros 3:', Object.entries(totals).slice(0, 3));
-        
+
         return totals;
     }, [groupedByOrder, tabelaPrecos]);
 
@@ -537,7 +512,7 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
             });
             if (!itemPreco) return;
             
-            const category = getCostCategoryGroupForItem(itemPreco) === 'custosAdicionais' ? 'Custos Adicionais' : (itemPreco.categoria || 'Outros');
+            const category = getInvoiceGroupDisplayLabel(getDetalheInvoiceGroup(detalhe, itemPreco));
             
             if (!grouped[category]) {
                 grouped[category] = { items: [], total: 0 };
@@ -570,14 +545,15 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
             grouped[category].total += subtotal;
         });
         
-        // Sort categories by total (descending)
-        return Object.entries(grouped)
-            .sort(([, a], [, b]) => b.total - a.total)
-            .reduce((acc, [key, value]) => {
-                acc[key] = value;
+        const keys = sortInvoiceGroupLabels(Object.keys(grouped));
+        return keys.reduce(
+            (acc, key) => {
+                acc[key] = grouped[key];
                 return acc;
-            }, {} as Record<string, { items: AggregatedItem[]; total: number }>);
-    }, [filteredDetalhes, findItemPreco, tabelaPrecos]);
+            },
+            {} as Record<string, { items: AggregatedItem[]; total: number }>
+        );
+    }, [filteredDetalhes, findItemPreco]);
 
     // Orders start collapsed (not expanded) by default
     // Removed automatic expansion - users can expand orders manually if needed
@@ -991,7 +967,7 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                                             <div className="bg-white">
                                                 {Object.entries(categories).map(([category, categoryDetails]) => {
                                                     const categoryTotal = categoryDetails.reduce((sum, detalhe) => {
-                                                        const itemPreco = getPrecoItemInfo(detalhe.tabelaPrecoItemId);
+                                                        const itemPreco = getPrecoItemInfoForDetalhe(detalhe);
                                                         if (!itemPreco) return sum;
                                                         const precoUnitario = getPrecoUnitarioDetalhe(detalhe, itemPreco);
                                                         const quantidadeExibida = getQuantidadeExibida(detalhe, itemPreco);
@@ -1019,7 +995,7 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                                                                     </thead>
                                                                     <tbody className="bg-white divide-y divide-gray-200">
                                                                         {categoryDetails.map((detalhe, di) => {
-                                                                            const itemPreco = getPrecoItemInfo(detalhe.tabelaPrecoItemId);
+                                                                            const itemPreco = getPrecoItemInfoForDetalhe(detalhe);
                                                                             if (!itemPreco) return null;
                                                                             const precoUnitario = getPrecoUnitarioDetalhe(detalhe, itemPreco);
                                                                             const quantidadeExibida = getQuantidadeExibida(detalhe, itemPreco);
@@ -1073,7 +1049,7 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                                 </thead>
                                 <tbody className="bg-white divide-y divide-gray-200">
                                     {filteredDetalhes.map((detalhe, di) => {
-                                        const itemPreco = getPrecoItemInfo(detalhe.tabelaPrecoItemId);
+                                        const itemPreco = getPrecoItemInfoForDetalhe(detalhe);
                                         if (!itemPreco) return null;
                                         const precoUnitario = getPrecoUnitarioDetalhe(detalhe, itemPreco);
                                         const quantidadeExibida = getQuantidadeExibida(detalhe, itemPreco);
@@ -1129,7 +1105,7 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                                         {filteredDetalhes
                                             .filter(d => d.codigoPedido === 'ENTRADA DE MATERIAL')
                                             .map((detalhe, di) => {
-                                                const itemPreco = getPrecoItemInfo(detalhe.tabelaPrecoItemId);
+                                                const itemPreco = getPrecoItemInfoForDetalhe(detalhe);
                                                 const precoUnitario = getPrecoUnitarioDetalhe(detalhe, itemPreco);
                                                 const quantidadeExibida = getQuantidadeExibida(detalhe, itemPreco);
                                                 const subtotal = precoUnitario * quantidadeExibida;
@@ -1147,15 +1123,24 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                         </div>
                     )}
 
-                    {/* Custos Adicionais (excluindo reembolsos) */}
+                    {/* Lançamentos avulsos no Firestore (o total "Custos Adicionais" do resumo pode incluir linhas da tabela no detalhamento acima) */}
                     {custosAdicionais.filter(c => !c.isReembolso).length > 0 && (
                         <div className="mt-6 pt-4 border-t border-dashed">
-                            <h4 className="text-md font-semibold text-amber-700 mb-2 flex items-center gap-2">
+                            <h4 className="text-md font-semibold text-amber-700 mb-1 flex items-center gap-2">
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                                     <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd" />
                                 </svg>
-                                Custos Adicionais
+                                Registros avulsos (custos adicionais)
                             </h4>
+                            <p className="text-xs text-amber-800/90 mb-3 max-w-3xl">
+                                Itens cobrados pela tabela de preços aparecem em <strong>Detalhamento dos Itens</strong> nos grupos Custos Logísticos ou Custos Adicionais.
+                                Esta lista mostra apenas lançamentos cadastrados separadamente na fatura.
+                            </p>
+                            {Math.abs((cobranca.totalCustosAdicionais ?? 0) - totalCustosAdicionaisFirestore) > 0.02 && (
+                                <p className="text-xs text-amber-700 mb-2 max-w-3xl">
+                                    O valor total de <strong>Custos Adicionais</strong> no resumo inclui também linhas da tabela de preços acima; o total desta lista é {formatCurrency(totalCustosAdicionaisFirestore)}.
+                                </p>
+                            )}
                             <div className="overflow-x-auto">
                                 <table className="min-w-full divide-y divide-amber-100">
                                     <thead className="bg-amber-50">
@@ -1174,6 +1159,16 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                                             </tr>
                                         ))}
                                     </tbody>
+                                    <tfoot className="bg-amber-50/80">
+                                        <tr>
+                                            <td colSpan={2} className="px-4 py-2 text-sm font-medium text-amber-900 text-right">
+                                                Total desta lista
+                                            </td>
+                                            <td className="px-4 py-2 text-sm font-bold text-amber-900 text-right">
+                                                {formatCurrency(totalCustosAdicionaisFirestore)}
+                                            </td>
+                                        </tr>
+                                    </tfoot>
                                 </table>
                             </div>
                         </div>
@@ -1495,7 +1490,7 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                             </thead>
                             <tbody className="divide-y divide-gray-100">
                                 {filteredDetalhes.map((detalhe, detalheIdx) => {
-                                    const itemPreco = getPrecoItemInfo(detalhe.tabelaPrecoItemId);
+                                    const itemPreco = getPrecoItemInfoForDetalhe(detalhe);
                                     if (!itemPreco) return null;
                                     const precoUnitario = getPrecoUnitarioDetalhe(detalhe, itemPreco);
                                     const quantidadeExibida = getQuantidadeExibida(detalhe, itemPreco);
@@ -1560,7 +1555,7 @@ const ClientBillDetail: React.FC<ClientBillDetailProps> = ({ cobranca, detalhes,
                                         </tr>
                                     ))}
                                     {filteredDetalhes.filter(d => d.codigoPedido === 'ENTRADA DE MATERIAL').map((detalhe, di) => {
-                                        const itemPreco = getPrecoItemInfo(detalhe.tabelaPrecoItemId);
+                                        const itemPreco = getPrecoItemInfoForDetalhe(detalhe);
                                         const precoUnitario = getPrecoUnitarioDetalhe(detalhe, itemPreco);
                                         const quantidadeExibida = getQuantidadeExibida(detalhe, itemPreco);
                                         const subtotal = precoUnitario * quantidadeExibida;

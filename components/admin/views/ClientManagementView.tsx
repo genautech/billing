@@ -59,6 +59,7 @@ interface ClientManagementViewProps {
 }
 
 const ClientManagementView: React.FC<ClientManagementViewProps> = ({ clientes, onUpdate }) => {
+    const clientRows = clientes.filter(cliente => cliente.role === 'client');
     const [isFormOpen, setIsFormOpen] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [current, setCurrent] = useState<Omit<Cliente, 'id'>>({ 
@@ -285,7 +286,7 @@ const ClientManagementView: React.FC<ClientManagementViewProps> = ({ clientes, o
                         </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                        {clientes.map((c, cIdx) => (
+                        {clientRows.map((c, cIdx) => (
                             <tr key={`cliente-${cIdx}-${c.id}`}>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{c.nome}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{c.email}</td>

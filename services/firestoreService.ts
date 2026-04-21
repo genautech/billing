@@ -836,13 +836,36 @@ export const orderDetailToClientListagemCSV = (csvContent: string, mesReferencia
 // --- Clientes ---
 export const getClientes = async (): Promise<Cliente[]> => {
     const snapshot = await clientesCol.get();
-    return snapshot.docs.map(doc => {
+    const clientes = snapshot.docs.map(doc => {
         const data = doc.data();
         return {
             id: doc.id,
             ...data
         } as Cliente;
     });
+
+    // Firestore may contain legacy duplicate records for the same login email.
+    // Normalize here so admin/client pickers and login flow remain stable.
+    const uniqueClientes = new Map<string, Cliente>();
+    for (const cliente of clientes) {
+        const normalizedEmail = cliente.email?.trim().toLowerCase();
+        const uniqueKey = normalizedEmail || `${cliente.role}:${cliente.id}`;
+        const existing = uniqueClientes.get(uniqueKey);
+
+        if (!existing) {
+            uniqueClientes.set(uniqueKey, cliente);
+            continue;
+        }
+
+        const existingHasBillingEmail = Boolean(existing.emailFaturamento?.trim());
+        const currentHasBillingEmail = Boolean(cliente.emailFaturamento?.trim());
+
+        if (!existingHasBillingEmail && currentHasBillingEmail) {
+            uniqueClientes.set(uniqueKey, cliente);
+        }
+    }
+
+    return Array.from(uniqueClientes.values()).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
 };
 
 export const getClienteById = async (clienteId: string): Promise<Cliente | null> => {
@@ -1068,6 +1091,23 @@ export const getTabelaPrecos = async (clienteId?: string): Promise<TabelaPrecoIt
     
     return globalItems;
 };
+
+/**
+ * Tabela global + personalizada do cliente fundidas por id (itens do cliente sobrescrevem o global).
+ * Use no portal do cliente para exibir faturas: os detalhes gravados podem referenciar ids que existem
+ * só na coleção global (ex.: serviços TP de repasse), enquanto getTabelaPrecos(clienteId) pode devolver subconjunto.
+ */
+export async function getTabelaPrecosForClientInvoice(clienteId: string): Promise<TabelaPrecoItem[]> {
+    const [globalItems, clientItems] = await Promise.all([getTabelaPrecos(), getTabelaPrecos(clienteId)]);
+    const byId = new Map<string, TabelaPrecoItem>();
+    globalItems.forEach(i => {
+        if (i.id) byId.set(i.id, i);
+    });
+    clientItems.forEach(i => {
+        if (i.id) byId.set(i.id, i);
+    });
+    return Array.from(byId.values());
+}
 
 export const addTabelaPrecoItem = async (item: Omit<TabelaPrecoItem, 'id'>) => {
     return await tabelaPrecosCol.add(item);
@@ -1707,6 +1747,42 @@ export const getCostCategoryGroupForItem = (item: TabelaPrecoItem): 'envio' | 'a
     return getCostCategoryGroup(item.categoria);
 };
 
+/** Grupo da linha na fatura: override manual do detalhe ou derivado da tabela de preços. */
+export type InvoiceLineGroup = 'envio' | 'armazenagem' | 'logistico' | 'custosAdicionais';
+
+export function getDetalheInvoiceGroup(detalhe: DetalheEnvio, item: TabelaPrecoItem): InvoiceLineGroup {
+    return detalhe.grupoManual ?? getCostCategoryGroupForItem(item);
+}
+
+/** Rótulos alinhados ao resumo da fatura (gráfico / totais). */
+export function getInvoiceGroupDisplayLabel(group: InvoiceLineGroup): string {
+    switch (group) {
+        case 'envio':
+            return 'Envios';
+        case 'armazenagem':
+            return 'Armazenamento';
+        case 'logistico':
+            return 'Custos Logísticos';
+        case 'custosAdicionais':
+            return 'Custos Adicionais';
+        default: {
+            const _exhaustive: never = group;
+            return _exhaustive;
+        }
+    }
+}
+
+const INVOICE_GROUP_SORT_ORDER: InvoiceLineGroup[] = ['envio', 'armazenagem', 'logistico', 'custosAdicionais'];
+
+/** Ordenação estável para seções do detalhamento (mesma ordem lógica do resumo). */
+export function sortInvoiceGroupLabels(labels: string[]): string[] {
+    const rank = (label: string): number => {
+        const idx = INVOICE_GROUP_SORT_ORDER.findIndex(g => getInvoiceGroupDisplayLabel(g) === label);
+        return idx === -1 ? INVOICE_GROUP_SORT_ORDER.length : idx;
+    };
+    return [...labels].sort((a, b) => rank(a) - rank(b));
+}
+
 // Helper function to identify if an item is a template (dynamic cost)
 // Templates are items where the base cost comes from the CSV (variable) 
 // instead of being fixed in the price table.
@@ -1763,8 +1839,8 @@ export function createFindItemPreco(tabelaPrecos: TabelaPrecoItem[]): (
 
 const DIFAL_MIN_PRICE = 3.0;
 
-/** Effective unit price for a detalhe: manual override or calculated from table. Used by recalculateCobrancaTotalsFromDetalhes. */
-function getPrecoUnitarioDetalheForRecalc(detalhe: DetalheEnvio, item: TabelaPrecoItem): number {
+/** Preço unitário efetivo da linha (override manual, Difal, template, etc.). Única fonte para recálculo, admin e fatura do cliente. */
+export function getPrecoUnitarioDetalheFatura(detalhe: DetalheEnvio, item: TabelaPrecoItem): number {
     if (detalhe.precoUnitarioManual != null) return Number(detalhe.precoUnitarioManual);
     const isShippingItem = item.categoria === 'Envios' || item.categoria === 'Retornos';
     const isDifalItem = item.categoria === 'Difal' || item.descricao?.toLowerCase().includes('difal');
@@ -1774,13 +1850,18 @@ function getPrecoUnitarioDetalheForRecalc(detalhe: DetalheEnvio, item: TabelaPre
     return calculatePrecoVendaForDisplay(item);
 }
 
-/** Effective quantity for totalling: 1 for shipping/difal (non-template), else detalhe.quantidade. */
-function getQuantidadeExibidaForRecalc(detalhe: DetalheEnvio, item: TabelaPrecoItem): number {
+/** Quantidade usada no subtotal (1 por pedido para Difal e envio não-template; senão detalhe.quantidade). */
+export function getQuantidadeUsoFatura(detalhe: DetalheEnvio, item: TabelaPrecoItem): number {
     const isShippingItem = item.categoria === 'Envios' || item.categoria === 'Retornos';
     const isTemplate = isTemplateItem(item);
     const isDifalItem = item.categoria === 'Difal' || item.descricao?.toLowerCase().includes('difal');
     if (isDifalItem || (isShippingItem && !isTemplate)) return 1;
     return detalhe.quantidade;
+}
+
+/** Subtotal de venda da linha = preço unitário efetivo × quantidade de uso (igual ao recálculo da cobrança). */
+export function getSubtotalVendaDetalhe(detalhe: DetalheEnvio, item: TabelaPrecoItem): number {
+    return getPrecoUnitarioDetalheFatura(detalhe, item) * getQuantidadeUsoFatura(detalhe, item);
 }
 
 /**
@@ -1815,12 +1896,12 @@ export function recalculateCobrancaTotalsFromDetalhes(
         const item = tabelaPrecos.find(c => c.id === d.tabelaPrecoItemId);
         if (!item) return;
 
-        const group = d.grupoManual ?? getCostCategoryGroupForItem(item);
+        const group = getDetalheInvoiceGroup(d, item);
         const isTemplate = isTemplateItem(item);
         const isVariableCost = isTemplate || item.categoria === 'Envios' || item.categoria === 'Retornos' || item.categoria === 'Difal' || item.descricao?.toLowerCase().includes('difal');
 
-        const precoUnitario = getPrecoUnitarioDetalheForRecalc(d, item);
-        const quantidadeUsada = getQuantidadeExibidaForRecalc(d, item);
+        const precoUnitario = getPrecoUnitarioDetalheFatura(d, item);
+        const quantidadeUsada = getQuantidadeUsoFatura(d, item);
         const subtotalVenda = precoUnitario * quantidadeUsada;
 
         const isPassThrough = isTemplateItem(item);
@@ -3589,17 +3670,56 @@ export const updateGeneralSettings = async (settings: GeneralSettings) => {
     return await docRef.set(dataToSave, { merge: true }); // Use set with merge to create/update
 };
 
+const normalizeFaqQuestion = (question: string) =>
+    question
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+
+const choosePreferredFaq = (current: FaqItem, candidate: FaqItem) => {
+    const currentAnswerLength = current.resposta?.trim().length || 0;
+    const candidateAnswerLength = candidate.resposta?.trim().length || 0;
+    return candidateAnswerLength > currentAnswerLength ? candidate : current;
+};
+
 export const getFaqs = async (): Promise<FaqItem[]> => {
     const q = faqCol.orderBy('pergunta');
     const snapshot = await q.get();
-    return snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as FaqItem));
+    const faqs = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as FaqItem));
+    const uniqueFaqs = new Map<string, FaqItem>();
+
+    for (const faq of faqs) {
+        const normalizedQuestion = normalizeFaqQuestion(faq.pergunta);
+        const existing = uniqueFaqs.get(normalizedQuestion);
+        uniqueFaqs.set(
+            normalizedQuestion,
+            existing ? choosePreferredFaq(existing, faq) : faq
+        );
+    }
+
+    return Array.from(uniqueFaqs.values()).sort((a, b) => a.pergunta.localeCompare(b.pergunta, 'pt-BR'));
 };
 
 export const addFaqItem = async (faq: Omit<FaqItem, 'id'>) => {
+    const existingFaqs = await getFaqs();
+    const normalizedQuestion = normalizeFaqQuestion(faq.pergunta);
+    if (existingFaqs.some(item => normalizeFaqQuestion(item.pergunta) === normalizedQuestion)) {
+        throw new Error('Já existe uma FAQ cadastrada com esta pergunta.');
+    }
     return await faqCol.add(faq);
 };
 
 export const updateFaqItem = async (faq: FaqItem) => {
+    const existingFaqs = await getFaqs();
+    const normalizedQuestion = normalizeFaqQuestion(faq.pergunta);
+    const hasDuplicate = existingFaqs.some(item =>
+        item.id !== faq.id && normalizeFaqQuestion(item.pergunta) === normalizedQuestion
+    );
+    if (hasDuplicate) {
+        throw new Error('Já existe outra FAQ cadastrada com esta pergunta.');
+    }
     const docRef = faqCol.doc(faq.id);
     const { id, ...dataToUpdate } = faq;
     return await docRef.update(dataToUpdate);
@@ -3608,6 +3728,39 @@ export const updateFaqItem = async (faq: FaqItem) => {
 export const deleteFaqItem = async (id: string) => {
     const docRef = faqCol.doc(id);
     return await docRef.delete();
+};
+
+export const cleanupDuplicateFaqs = async (): Promise<number> => {
+    const snapshot = await faqCol.get();
+    const faqs = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as FaqItem));
+    const groupedFaqs = new Map<string, FaqItem[]>();
+
+    for (const faq of faqs) {
+        const normalizedQuestion = normalizeFaqQuestion(faq.pergunta);
+        const group = groupedFaqs.get(normalizedQuestion) || [];
+        group.push(faq);
+        groupedFaqs.set(normalizedQuestion, group);
+    }
+
+    const batch = db.batch();
+    let removedCount = 0;
+
+    groupedFaqs.forEach(group => {
+        if (group.length <= 1) return;
+
+        const preferredFaq = group.reduce((best, current) => choosePreferredFaq(best, current));
+        group.forEach(faq => {
+            if (faq.id === preferredFaq.id) return;
+            batch.delete(faqCol.doc(faq.id));
+            removedCount++;
+        });
+    });
+
+    if (removedCount > 0) {
+        await batch.commit();
+    }
+
+    return removedCount;
 };
 
 
@@ -4070,14 +4223,14 @@ export const seedNotasFiscaisFaqs = async () => {
         if (faqsToAdd && faqsToAdd.length > 0) {
             // Verificar quais FAQs já existem para evitar duplicatas
             const existingFaqs = await getFaqs();
-            const existingPerguntas = new Set(existingFaqs.map(faq => faq.pergunta.toLowerCase().trim()));
+            const existingPerguntas = new Set(existingFaqs.map(faq => normalizeFaqQuestion(faq.pergunta)));
             
             const batch = db.batch();
             let addedCount = 0;
             
             faqsToAdd.forEach(faq => {
                 // Verificar se a pergunta já existe (case-insensitive)
-                if (!existingPerguntas.has(faq.pergunta.toLowerCase().trim())) {
+                if (!existingPerguntas.has(normalizeFaqQuestion(faq.pergunta))) {
                     const docRef = faqCol.doc();
                     batch.set(docRef, faq);
                     addedCount++;
