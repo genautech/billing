@@ -114,9 +114,10 @@ interface EditInvoiceModalProps {
     cobranca: CobrancaMensal;
     cliente: Cliente | undefined;
     tabelaPrecos: TabelaPrecoItem[];
+    onOpenShipmentReport?: (cobrancaId: string) => void;
 }
 
-const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, onSave, cobranca: initialCobranca, cliente, tabelaPrecos }) => {
+const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, onSave, cobranca: initialCobranca, cliente, tabelaPrecos, onOpenShipmentReport }) => {
     const manualCostCategories: NonNullable<CustoAdicional['categoria']>[] = ['Armazenagem', 'Maquila/Entrada', 'Estoque', 'Logístico', 'Envios', 'Outro'];
     const [cobranca, setCobranca] = useState<CobrancaMensal>(initialCobranca);
     const [detalhes, setDetalhes] = useState<DetalheEnvio[]>([]);
@@ -315,7 +316,7 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
                 ...prev,
                 totalCustosExtras,
                 custoTotal,
-                valorTotal: prev.totalEnvio + prev.totalArmazenagem + prev.totalCustosLogisticos + totalCustosExtras + (prev.totalCustosAdicionais ?? 0) - totalReembolsos + (prev.totalEntradaMaterial ?? 0)
+                valorTotal: (prev.totalEnvio ?? 0) + (prev.totalArmazenagem ?? 0) + (prev.totalCustosLogisticos ?? 0) + totalCustosExtras + (prev.totalCustosAdicionais ?? 0) + (prev.totalEntradaMaterial ?? 0)
             }));
         } else {
             setCobranca(prev => ({ ...prev, totalEnvio, totalArmazenagem, totalCustosLogisticos, totalCustosAdicionais, totalCustosExtras, valorTotal, custoTotal }));
@@ -527,6 +528,19 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
                 <header className="flex justify-between items-center p-4 border-b">
                     <h2 className="text-xl font-semibold text-gray-800">Editar Fatura: {cliente?.nome} - {cobranca.mesReferencia}</h2>
                     <div className="flex items-center gap-2">
+                        {onOpenShipmentReport && (
+                            <button
+                                type="button"
+                                onClick={() => { onClose(); onOpenShipmentReport(cobranca.id); }}
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3 py-1.5 rounded-md font-semibold transition flex items-center gap-1 shadow-sm"
+                                title="Abrir editor de planilha de envios"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fillRule="evenodd" d="M5 4a3 3 0 00-3 3v6a3 3 0 003 3h10a3 3 0 003-3V7a3 3 0 00-3-3H5zm-1 9v-1h5v1H4zm7 0v-1h5v1h-5zm-7-3V9h5v1H4zm7 0V9h5v1h-5zm-7-3V6h5v1H4zm7 0V6h5v1h-5z" clipRule="evenodd" />
+                                </svg>
+                                <span>Planilha de Envios (Excel)</span>
+                            </button>
+                        )}
                         <button onClick={handlePrintPdf} className="text-gray-500 hover:text-blue-600 p-1.5 rounded-md hover:bg-blue-50 transition-colors" title="Imprimir fatura (PDF)">
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
                         </button>
@@ -581,37 +595,51 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
                                         placeholder="Ex: 01/01/2026 a 31/01/2026"
                                     />
                                 </div>
-                            </div>
-                            <div className="flex flex-wrap items-end gap-2 mb-2">
-                                <span className="text-sm text-gray-500">Totais editáveis; altere e salve. </span>
-                                <button type="button" onClick={() => { setTotaisEditadosManualmente(false); recalculateTotals(detalhes, custosAdicionais, null, true); }} className="text-sm font-medium text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded">Recalcular</button>
-                                <button type="button" onClick={handleRevert} disabled={isLoading} className="text-sm font-medium text-amber-600 hover:text-amber-800 bg-amber-50 hover:bg-amber-100 px-2 py-1 rounded disabled:opacity-50 disabled:cursor-not-allowed">Reverter alterações</button>
-                                {totaisEditadosManualmente && <span className="text-xs text-amber-600">(valores manuais)</span>}
-                            </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 mb-6">
-                                <div className="bg-gray-100 p-4 rounded-lg">
-                                    <p className="text-sm text-gray-600 mb-1">Total Envios</p>
-                                    <FormInput type="number" step="0.01" min="0" className="text-lg font-bold w-full" value={cobranca.totalEnvio != null ? Number(cobranca.totalEnvio.toFixed(2)) : ''} onChange={e => { const v = parseFloat(e.target.value) || 0; setTotaisEditadosManualmente(true); setCobranca(prev => ({ ...prev, totalEnvio: v, valorTotal: v + (prev.totalArmazenagem ?? 0) + (prev.totalCustosLogisticos ?? 0) + (prev.totalCustosExtras ?? 0) + (prev.totalCustosAdicionais ?? 0) })); }} />
+                                <div className="sm:col-span-3 flex flex-wrap items-center justify-between gap-2 mb-2 bg-white p-3 rounded-lg border">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-sm font-semibold text-gray-700">Totais editáveis:</span>
+                                        <button type="button" onClick={() => { setTotaisEditadosManualmente(false); recalculateTotals(detalhes, custosAdicionais, null, true); }} className="text-xs font-medium text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2.5 py-1.5 rounded transition">Recalcular</button>
+                                        <button type="button" onClick={handleRevert} disabled={isLoading} className="text-xs font-medium text-amber-600 hover:text-amber-800 bg-amber-50 hover:bg-amber-100 px-2.5 py-1.5 rounded disabled:opacity-50 disabled:cursor-not-allowed transition">Reverter alterações</button>
+                                        {totaisEditadosManualmente && <span className="text-xs text-amber-600 font-medium">(valores manuais)</span>}
+                                    </div>
+                                    {onOpenShipmentReport && (
+                                        <button
+                                            type="button"
+                                            onClick={() => { onClose(); onOpenShipmentReport(cobranca.id); }}
+                                            className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3 py-1.5 rounded-md font-semibold transition flex items-center gap-1.5 shadow"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                                <path fillRule="evenodd" d="M5 4a3 3 0 00-3 3v6a3 3 0 003 3h10a3 3 0 003-3V7a3 3 0 00-3-3H5zm-1 9v-1h5v1H4zm7 0v-1h5v1h-5zm-7-3V9h5v1H4zm7 0V9h5v1h-5zm-7-3V6h5v1H4zm7 0V6h5v1h-5z" clipRule="evenodd" />
+                                            </svg>
+                                            <span>Editar Planilha de Envios (Excel)</span>
+                                        </button>
+                                    )}
                                 </div>
-                                <div className="bg-gray-100 p-4 rounded-lg">
-                                    <p className="text-sm text-gray-600 mb-1">Total Logística</p>
-                                    <FormInput type="number" step="0.01" min="0" className="text-lg font-bold w-full" value={cobranca.totalCustosLogisticos != null ? Number(cobranca.totalCustosLogisticos.toFixed(2)) : ''} onChange={e => { const v = parseFloat(e.target.value) || 0; setTotaisEditadosManualmente(true); setCobranca(prev => ({ ...prev, totalCustosLogisticos: v, valorTotal: (prev.totalEnvio ?? 0) + (prev.totalArmazenagem ?? 0) + v + (prev.totalCustosExtras ?? 0) + (prev.totalCustosAdicionais ?? 0) })); }} />
-                                </div>
-                                <div className="bg-gray-100 p-4 rounded-lg">
-                                    <p className="text-sm text-gray-600 mb-1">Total Armazenagem</p>
-                                    <FormInput type="number" step="0.01" min="0" className="text-lg font-bold w-full" value={cobranca.totalArmazenagem != null ? Number(cobranca.totalArmazenagem.toFixed(2)) : ''} onChange={e => { const v = parseFloat(e.target.value) || 0; setTotaisEditadosManualmente(true); setCobranca(prev => ({ ...prev, totalArmazenagem: v, valorTotal: (prev.totalEnvio ?? 0) + v + (prev.totalCustosLogisticos ?? 0) + (prev.totalCustosExtras ?? 0) + (prev.totalCustosAdicionais ?? 0) })); }} />
-                                </div>
-                                <div className="bg-gray-100 p-4 rounded-lg">
-                                    <p className="text-sm text-gray-600 mb-1">Custos Adicionais</p>
-                                    <FormInput type="number" step="0.01" className="text-lg font-bold w-full" value={cobranca.totalCustosAdicionais != null ? Number(cobranca.totalCustosAdicionais.toFixed(2)) : ''} onChange={e => { const v = parseFloat(e.target.value) || 0; setTotaisEditadosManualmente(true); setCobranca(prev => ({ ...prev, totalCustosAdicionais: v, valorTotal: (prev.totalEnvio ?? 0) + (prev.totalArmazenagem ?? 0) + (prev.totalCustosLogisticos ?? 0) + (prev.totalCustosExtras ?? 0) + v })); }} />
-                                </div>
-                                <div className="bg-gray-100 p-4 rounded-lg">
-                                    <p className="text-sm text-gray-600 mb-1">Total Entrada de Material (R$)</p>
-                                    <FormInput type="number" step="0.01" min="0" className="text-lg font-bold w-full" value={cobranca.totalEntradaMaterial != null ? Number(cobranca.totalEntradaMaterial.toFixed(2)) : ''} onChange={e => { const raw = e.target.value; const v = raw === '' ? undefined : parseFloat(raw) || 0; setCobranca(prev => ({ ...prev, totalEntradaMaterial: v })); }} placeholder="Opcional" />
-                                </div>
-                                <div className="bg-blue-100 p-4 rounded-lg border border-blue-200">
-                                    <p className="text-sm text-blue-700">Valor Total</p>
-                                    <p className="text-xl font-bold text-blue-800">{formatCurrency(cobranca.valorTotal)}</p>
+                                <div className="sm:col-span-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
+                                    <div className="bg-gray-100 p-3 rounded-lg border">
+                                        <p className="text-xs font-semibold text-gray-600 mb-1">Total Envios (R$)</p>
+                                        <FormInput type="number" step="0.01" min="0" className="text-base font-bold w-full" value={cobranca.totalEnvio != null ? Number(cobranca.totalEnvio.toFixed(2)) : ''} onChange={e => { const v = parseFloat(e.target.value) || 0; setTotaisEditadosManualmente(true); setCobranca(prev => ({ ...prev, totalEnvio: v, valorTotal: v + (prev.totalArmazenagem ?? 0) + (prev.totalCustosLogisticos ?? 0) + (prev.totalCustosExtras ?? 0) + (prev.totalCustosAdicionais ?? 0) + (prev.totalEntradaMaterial ?? 0) })); }} />
+                                    </div>
+                                    <div className="bg-gray-100 p-3 rounded-lg border">
+                                        <p className="text-xs font-semibold text-gray-600 mb-1">Total Logística (R$)</p>
+                                        <FormInput type="number" step="0.01" min="0" className="text-base font-bold w-full" value={cobranca.totalCustosLogisticos != null ? Number(cobranca.totalCustosLogisticos.toFixed(2)) : ''} onChange={e => { const v = parseFloat(e.target.value) || 0; setTotaisEditadosManualmente(true); setCobranca(prev => ({ ...prev, totalCustosLogisticos: v, valorTotal: (prev.totalEnvio ?? 0) + (prev.totalArmazenagem ?? 0) + v + (prev.totalCustosExtras ?? 0) + (prev.totalCustosAdicionais ?? 0) + (prev.totalEntradaMaterial ?? 0) })); }} />
+                                    </div>
+                                    <div className="bg-gray-100 p-3 rounded-lg border">
+                                        <p className="text-xs font-semibold text-gray-600 mb-1">Total Armazenagem (R$)</p>
+                                        <FormInput type="number" step="0.01" min="0" className="text-base font-bold w-full" value={cobranca.totalArmazenagem != null ? Number(cobranca.totalArmazenagem.toFixed(2)) : ''} onChange={e => { const v = parseFloat(e.target.value) || 0; setTotaisEditadosManualmente(true); setCobranca(prev => ({ ...prev, totalArmazenagem: v, valorTotal: (prev.totalEnvio ?? 0) + v + (prev.totalCustosLogisticos ?? 0) + (prev.totalCustosExtras ?? 0) + (prev.totalCustosAdicionais ?? 0) + (prev.totalEntradaMaterial ?? 0) })); }} />
+                                    </div>
+                                    <div className="bg-gray-100 p-3 rounded-lg border">
+                                        <p className="text-xs font-semibold text-gray-600 mb-1">Custos Adicionais (R$)</p>
+                                        <FormInput type="number" step="0.01" className="text-base font-bold w-full" value={cobranca.totalCustosAdicionais != null ? Number(cobranca.totalCustosAdicionais.toFixed(2)) : ''} onChange={e => { const v = parseFloat(e.target.value) || 0; setTotaisEditadosManualmente(true); setCobranca(prev => ({ ...prev, totalCustosAdicionais: v, valorTotal: (prev.totalEnvio ?? 0) + (prev.totalArmazenagem ?? 0) + (prev.totalCustosLogisticos ?? 0) + (prev.totalCustosExtras ?? 0) + v + (prev.totalEntradaMaterial ?? 0) })); }} />
+                                    </div>
+                                    <div className="bg-gray-100 p-3 rounded-lg border">
+                                        <p className="text-xs font-semibold text-gray-600 mb-1">Total Entrada de Material (R$)</p>
+                                        <FormInput type="number" step="0.01" min="0" className="text-base font-bold w-full" value={cobranca.totalEntradaMaterial != null ? Number(cobranca.totalEntradaMaterial.toFixed(2)) : ''} onChange={e => { const raw = e.target.value; const v = raw === '' ? undefined : parseFloat(raw) || 0; setCobranca(prev => ({ ...prev, totalEntradaMaterial: v, valorTotal: (prev.totalEnvio ?? 0) + (prev.totalArmazenagem ?? 0) + (prev.totalCustosLogisticos ?? 0) + (prev.totalCustosExtras ?? 0) + (prev.totalCustosAdicionais ?? 0) + (v ?? 0) })); }} placeholder="Opcional" />
+                                    </div>
+                                    <div className="bg-blue-50 p-3 rounded-lg border border-blue-200 flex flex-col justify-center">
+                                        <p className="text-xs font-semibold text-blue-700">Valor Total da Fatura</p>
+                                        <p className="text-xl font-extrabold text-blue-900">{formatCurrency(cobranca.valorTotal)}</p>
+                                    </div>
                                 </div>
                             </div>
                             <div className="overflow-x-auto">
@@ -874,32 +902,69 @@ const EditInvoiceModal: React.FC<EditInvoiceModalProps> = ({ isOpen, onClose, on
                                             )}
                                         </div>
                                     </div>
-                                )}
-                                    </>
-                                )}
-                            </div>
-                            <div className="mt-6 pt-6 border-t">
-                                <h4 className="font-semibold text-gray-700 mb-2">Custos Adicionais / Manuais</h4>
-                                 <div className="space-y-2">
-                                    {custosAdicionais.map((custo, custoIdx) => (
-                                        <div key={`custo-${custoIdx}-${custo.id}`} className="flex items-center gap-2 p-2 bg-gray-50 rounded-md">
-                                            <FormInput type="text" value={custo.descricao} onChange={(e) => handleCustoAdicionalChange(custo.id, 'descricao', e.target.value)} placeholder="Descrição do Custo" className="flex-grow text-sm"/>
-                                            <FormSelect
-                                                value={custo.categoria || 'Outro'}
-                                                onChange={(e) => handleCustoAdicionalChange(custo.id, 'categoria', e.target.value)}
-                                                className="w-40 text-sm"
-                                            >
-                                                {manualCostCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                                            </FormSelect>
-                                            <FormInput type="number" value={custo.valor} onChange={(e) => handleCustoAdicionalChange(custo.id, 'valor', e.target.value)} placeholder="Valor (R$)" className="w-32 text-sm text-right" step="0.01"/>
-                                            <button type="button" onClick={() => handleDeleteCustoAdicional(custo.id)} className="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100"><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg></button>
-                                        </div>
-                                    ))}
-                                </div>
-                                <button type="button" onClick={handleAddCustoAdicional} className="mt-2 text-sm font-medium text-blue-600 hover:text-blue-800 bg-blue-100 hover:bg-blue-200 px-3 py-1.5 rounded-md transition-colors flex items-center space-x-2">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" /></svg>
-                                    <span>Adicionar Custo Adicional</span>
-                                </button>
+                                 )}
+                             </>
+                         )}
+                     </div>
+                     <div className="mt-6 pt-6 border-t">
+                                 <h4 className="font-semibold text-gray-700 mb-2">Custos Adicionais / Manuais</h4>
+                                  <div className="space-y-2">
+                                     {custosAdicionais.map((custo, custoIdx) => (
+                                         <div key={`custo-${custoIdx}-${custo.id}`} className={`p-3 rounded-md border ${custo.isReembolso ? 'bg-green-50 border-green-300' : 'bg-gray-50 border-gray-200'}`}>
+                                             <div className="flex items-center gap-2">
+                                                 <FormInput 
+                                                     type="text" 
+                                                     value={custo.descricao} 
+                                                     onChange={(e) => handleCustoAdicionalChange(custo.id, 'descricao', e.target.value)} 
+                                                     placeholder="Descrição do Custo" 
+                                                     className="flex-grow text-sm"
+                                                 />
+                                                 <FormSelect
+                                                     value={custo.categoria || 'Outro'}
+                                                     onChange={(e) => handleCustoAdicionalChange(custo.id, 'categoria', e.target.value)}
+                                                     className="w-40 text-sm"
+                                                 >
+                                                     {manualCostCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                                                 </FormSelect>
+                                                 <FormInput 
+                                                     type="number" 
+                                                     value={custo.valor} 
+                                                     onChange={(e) => handleCustoAdicionalChange(custo.id, 'valor', e.target.value)} 
+                                                     placeholder="Valor (R$)" 
+                                                     className={`w-32 text-sm text-right ${custo.isReembolso ? 'text-green-700 font-semibold' : ''}`}
+                                                     step="0.01"
+                                                 />
+                                                 <label className="flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
+                                                     <input
+                                                         type="checkbox"
+                                                         checked={custo.isReembolso || false}
+                                                         onChange={(e) => handleCustoAdicionalChange(custo.id, 'isReembolso', e.target.checked)}
+                                                         className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                                                     />
+                                                     <span className="text-xs text-gray-600">Reembolso</span>
+                                                 </label>
+                                                 <button type="button" onClick={() => handleDeleteCustoAdicional(custo.id)} className="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100">
+                                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg>
+                                                 </button>
+                                             </div>
+                                             {custo.isReembolso && (
+                                                 <div className="mt-2">
+                                                     <FormInput 
+                                                         type="text" 
+                                                         value={custo.motivoReembolso || ''} 
+                                                         onChange={(e) => handleCustoAdicionalChange(custo.id, 'motivoReembolso', e.target.value)} 
+                                                         placeholder="Motivo do reembolso (ex: Erro de cobrança, Devolução, etc.)" 
+                                                         className="w-full text-sm bg-white"
+                                                     />
+                                                 </div>
+                                             )}
+                                         </div>
+                                     ))}
+                                 </div>
+                                 <button type="button" onClick={handleAddCustoAdicional} className="mt-2 text-sm font-medium text-blue-600 hover:text-blue-800 bg-blue-100 hover:bg-blue-200 px-3 py-1.5 rounded-md transition-colors flex items-center space-x-2">
+                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" /></svg>
+                                     <span>Adicionar Custo Adicional</span>
+                                 </button>
                             </div>
                             <div className="mt-6 pt-6 border-t">
                                 <h4 className="font-semibold text-gray-700 mb-4">Documentos e Pagamento</h4>
@@ -1161,9 +1226,10 @@ interface BillingArchiveViewProps {
     clientes: Cliente[];
     tabelaPrecos: TabelaPrecoItem[];
     onUpdate: () => void;
+    onOpenShipmentReport?: (cobrancaId: string) => void;
 }
 
-const BillingArchiveView: React.FC<BillingArchiveViewProps> = ({ cobrancas, clientes, tabelaPrecos, onUpdate }) => {
+const BillingArchiveView: React.FC<BillingArchiveViewProps> = ({ cobrancas, clientes, tabelaPrecos, onUpdate, onOpenShipmentReport }) => {
     const [editingCobranca, setEditingCobranca] = useState<CobrancaMensal | null>(null);
     const [cobrancaToDelete, setCobrancaToDelete] = useState<CobrancaMensal | null>(null);
     const [isConfirmDeleteModalOpen, setIsConfirmDeleteModalOpen] = useState(false);
@@ -1400,6 +1466,9 @@ const BillingArchiveView: React.FC<BillingArchiveViewProps> = ({ cobrancas, clie
                                     <td className="px-4 py-4 whitespace-nowrap text-sm font-medium text-right space-x-2">
                                         <span className="text-gray-500">{formatDate(c.dataVencimento)}</span>
                                         <button onClick={() => handlePrintFromArchive(c)} disabled={isPrinting} className="text-blue-600 hover:text-blue-900 disabled:text-gray-400" title="Imprimir PDF">Imprimir</button>
+                                        {onOpenShipmentReport && (
+                                            <button onClick={() => onOpenShipmentReport(c.id)} className="text-emerald-600 hover:text-emerald-900 font-semibold" title="Editar planilha de envios (Excel)">Planilha Envios</button>
+                                        )}
                                         <button onClick={() => handleEdit(c)} className="text-indigo-600 hover:text-indigo-900">Editar</button>
                                         <button onClick={() => handleDeleteClick(c)} className="text-red-600 hover:text-red-900">Excluir</button>
                                     </td>
@@ -1418,6 +1487,7 @@ const BillingArchiveView: React.FC<BillingArchiveViewProps> = ({ cobrancas, clie
                     cobranca={editingCobranca}
                     cliente={clientes.find(c => c.id === editingCobranca.clienteId)}
                     tabelaPrecos={tabelaPrecos}
+                    onOpenShipmentReport={onOpenShipmentReport}
                 />
             )}
             

@@ -256,7 +256,7 @@ const filterDataByMonth = (data: Record<string, string>[], dateColumn: string, m
 
     if (targetMonth === undefined || isNaN(targetYear)) {
         console.warn(`Mês de referência inválido: ${month}`);
-        return [];
+        return data;
     }
     
     const filtered = data.filter(row => {
@@ -264,22 +264,51 @@ const filterDataByMonth = (data: Record<string, string>[], dateColumn: string, m
         if (!dateStr) return false;
         
         try {
-            const date = new Date(dateStr);
-            const isISO = /^\d{4}-\d{2}-\d{2}/.test(dateStr);
-            const isUTC = dateStr.includes('UTC');
+            let m: number | undefined;
+            let y: number | undefined;
+
+            // Handle DD/MM/YYYY format (common in Brazilian CSVs)
+            if (dateStr.includes('/')) {
+                const dateParts = dateStr.trim().split(' ')[0].split('/');
+                if (dateParts.length === 3) {
+                    const firstNum = parseInt(dateParts[0], 10);
+                    const secondNum = parseInt(dateParts[1], 10);
+                    const yearNum = parseInt(dateParts[2], 10);
+
+                    if (firstNum > 12) {
+                        // Definitely DD/MM/YYYY
+                        m = secondNum - 1;
+                        y = yearNum;
+                    } else if (secondNum > 12) {
+                        // MM/DD/YYYY
+                        m = firstNum - 1;
+                        y = yearNum;
+                    } else {
+                        // Default to DD/MM/YYYY in PT-BR context
+                        m = secondNum - 1;
+                        y = yearNum;
+                    }
+                }
+            }
+
+            if (m === undefined || y === undefined || isNaN(m) || isNaN(y)) {
+                const date = new Date(dateStr);
+                if (isNaN(date.getTime())) return false;
+                const isISO = /^\d{4}-\d{2}-\d{2}/.test(dateStr);
+                const isUTC = dateStr.includes('UTC');
+                
+                m = (isISO || isUTC) ? date.getUTCMonth() : date.getMonth();
+                y = (isISO || isUTC) ? date.getUTCFullYear() : date.getFullYear();
+            }
             
-            const m = (isISO || isUTC) ? date.getUTCMonth() : date.getMonth();
-            const y = (isISO || isUTC) ? date.getUTCFullYear() : date.getFullYear();
-            
-            const matches = m === targetMonth && y === targetYear;
-            return matches;
+            return m === targetMonth && y === targetYear;
         } catch (e) {
-            console.error(`Formato de data inválido na coluna ${dateColumn}: ${dateStr}`);
             return false;
         }
     });
 
-    return filtered;
+    // If date filtering returned matches, use them; otherwise, if the CSV was already pre-filtered for the invoice, fallback to data
+    return filtered.length > 0 ? filtered : data;
 };
 
 // --- Helper to filter data by date range ---
@@ -393,7 +422,7 @@ const sanitizeDocumentId = (id: string): string => {
 };
 
 // --- Helper to parse CSV ---
-const parseCSV = (csv: string): Record<string, string>[] => {
+export const parseCSV = (csv: string): Record<string, string>[] => {
     // Handle Byte Order Mark (BOM)
     csv = csv.startsWith('\ufeff') ? csv.substring(1) : csv;
     const allLines = csv.trim().replace(/\r/g, '').split('\n');
@@ -760,14 +789,18 @@ export const countShipmentsInMonth = (csvContent: string, month: string): number
         'Date',
         'Envio Date',
         'Data do pedido',
-        'Data do Pedido'
+        'Data do Pedido',
+        'Shipped At',
+        'shipped_at',
+        'Placed At',
+        'placed_at'
     ]);
     
-    if (!dateColumn) return 0;
+    if (!dateColumn) return data.length;
     
     // Filter by month and return count
     const filteredData = filterDataByMonth(data, dateColumn, month);
-    return filteredData.length;
+    return filteredData.length > 0 ? filteredData.length : data.length;
 };
 
 const stringifyCSV = (data: Record<string, string>[]): string => {

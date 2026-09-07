@@ -92,7 +92,7 @@ const ClientShipmentReport: React.FC<ClientShipmentReportProps> = ({ clientCobra
                 }
             }
         
-            if (headerIndex === -1) return { headers: [], rows: [] };
+            if (headerIndex === -1) return { headers: [], rows: [], totalRawShipmentsCount: 0 };
         
             const dataLines = allLines.slice(headerIndex + 1);
             const regex = new RegExp(`${delimiter}(?=(?:(?:[^"]*"){2})*[^"]*$)`);
@@ -110,13 +110,9 @@ const ClientShipmentReport: React.FC<ClientShipmentReportProps> = ({ clientCobra
         
             const dateColumnIndex = rawHeaders.findIndex(h => h.trim().toLowerCase().replace(/"/g, '') === 'data');
             
-            // Find item name column index for digital/voucher filtering
-            const itemNameColumnIndex = rawHeaders.findIndex(h => {
-                const normalized = h.trim().toLowerCase().replace(/"/g, '');
-                return normalized === 'item name' || normalized === 'nome do item' || 
-                       normalized === 'nome do produto' || normalized === 'product name' ||
-                       normalized === 'produto' || normalized === 'title' || normalized === 'título';
-            });
+            // Total raw non-empty shipment lines (summing both physical and digital products)
+            const validDataLines = dataLines.filter(line => line && line.trim().length > 0);
+            const totalRawShipmentsCount = validDataLines.length;
         
             const rows = dataLines.map(line => {
                 if (!line.trim()) return null;
@@ -125,14 +121,14 @@ const ClientShipmentReport: React.FC<ClientShipmentReportProps> = ({ clientCobra
                     fullRow.push('');
                 }
                 
-                // Filter out digital/voucher rows using helper
-                if (itemNameColumnIndex !== -1) {
-                    const rowRecord: Record<string, string> = {};
-                    rawHeaders.forEach((h, idx) => {
-                        rowRecord[h.replace(/^"|"$/g, '')] = fullRow[idx]?.trim().replace(/^"|"$/g, '') || '';
-                    });
-                    if (isDigitalVoucherOrder(rowRecord)) return null;
-                }
+                // Build row record for all headers to filter out digital/voucher orders
+                const rowRecord: Record<string, string> = {};
+                rawHeaders.forEach((h, idx) => {
+                    const key = h.replace(/^"|"$/g, '').trim();
+                    rowRecord[key] = fullRow[idx]?.trim().replace(/^"|"$/g, '') || '';
+                });
+                
+                if (isDigitalVoucherOrder(rowRecord)) return null;
                 
                 const filteredRow = keptColumnIndices.map(index => fullRow[index]?.trim().replace(/^"|"$/g, '') || '');
         
@@ -154,15 +150,17 @@ const ClientShipmentReport: React.FC<ClientShipmentReportProps> = ({ clientCobra
                 return filteredRow;
             }).filter((row): row is string[] => row !== null && row.some(cell => cell.trim() !== ''));
         
-            return { headers: finalHeaders, rows };
+            return { headers: finalHeaders, rows, totalRawShipmentsCount };
         }
 
         // 2) Fallback: usar detalhes da fatura (já persistidos) quando não há CSV
         if (!selectedCobranca || !detalhesByCobrancaId || !tabelaPrecos) {
-            return { headers: [], rows: [] };
+            return { headers: [], rows: [], totalRawShipmentsCount: 0 };
         }
         const detalhes = detalhesByCobrancaId[selectedCobranca.id] || [];
-        if (detalhes.length === 0) return { headers: [], rows: [] };
+        if (detalhes.length === 0) return { headers: [], rows: [], totalRawShipmentsCount: 0 };
+
+        const totalRawShipmentsCount = detalhes.length;
 
         const headers = ['Pedido', 'Rastreio', 'Estado', 'CEP', 'Serviço', 'Quantidade', 'Subtotal (R$)'];
         const rows = detalhes.map(d => {
@@ -171,12 +169,16 @@ const ClientShipmentReport: React.FC<ClientShipmentReportProps> = ({ clientCobra
             const isShippingItem = item ? getCostCategoryGroup(item.categoria) === 'envio' : false;
             if (!item || !isShippingItem) return null;
 
+            // Exclude digital voucher items if item description or subcategory indicates digital/voucher
+            const isDigital = item.descricao?.toLowerCase().includes('digital') || 
+                              item.descricao?.toLowerCase().includes('voucher') ||
+                              item.subcategoria?.toLowerCase().includes('digital');
+            if (isDigital) return null;
+
             const subtotal = (() => {
                 const isTemplate = isTemplateItem(item);
                 const isNonTemplateShipping = isShippingItem && !isTemplate;
                 if (isNonTemplateShipping) {
-                    // For non-template shipping: quantity = 1, price = value from CSV (stored in quantidade)
-                    // Apply price calculation with margin
                     return calculatePrecoVenda(item, d.quantidade);
                 }
                 return calculatePrecoVenda(item) * d.quantidade;
@@ -193,7 +195,7 @@ const ClientShipmentReport: React.FC<ClientShipmentReportProps> = ({ clientCobra
             ];
         }).filter((row): row is string[] => row !== null);
 
-        return { headers, rows };
+        return { headers, rows, totalRawShipmentsCount };
     }, [selectedCobranca, detalhesByCobrancaId, tabelaPrecos]);
 
     const filteredRows = useMemo(() => {
@@ -429,7 +431,7 @@ const ClientShipmentReport: React.FC<ClientShipmentReportProps> = ({ clientCobra
                     <div>
                         <p className="text-xs text-gray-500 uppercase font-medium">Total de Envios</p>
                         <p className="text-xl font-bold text-blue-700">
-                            {selectedCobranca.quantidadeEnviosDisplay ?? selectedCobranca.quantidadeEnvios ?? reportData.rows.length}
+                            {selectedCobranca.quantidadeEnviosDisplay ?? selectedCobranca.quantidadeEnvios ?? (reportData.totalRawShipmentsCount && reportData.totalRawShipmentsCount > 0 ? reportData.totalRawShipmentsCount : reportData.rows.length)}
                         </p>
                     </div>
                     <div>

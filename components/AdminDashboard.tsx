@@ -13,9 +13,10 @@ import GeneralSettingsView from './admin/views/GeneralSettingsView';
 import FaqManagementView from './admin/views/FaqManagementView';
 import ClientPriceTableManagementView from './admin/views/ClientPriceTableManagementView';
 import PaymentsView from './admin/views/PaymentsView';
+import ShipmentReportGeneratorView from './admin/views/ShipmentReportGeneratorView';
 
 
-type AdminView = 'dashboard' | 'clients' | 'billing' | 'archive' | 'settings' | 'templates' | 'general-settings' | 'faq' | 'client-price-tables' | 'payments';
+type AdminView = 'dashboard' | 'clients' | 'billing' | 'archive' | 'shipment-report' | 'settings' | 'templates' | 'general-settings' | 'faq' | 'client-price-tables' | 'payments';
 
 interface AdminDashboardProps {
     adminUser: Cliente;
@@ -72,12 +73,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminUser, settings, fa
         </button>
     );
     
+    const [selectedShipmentReportCobrancaId, setSelectedShipmentReportCobrancaId] = useState<string>('');
+
+    const handleOpenShipmentReport = (cobrancaId: string) => {
+        setSelectedShipmentReportCobrancaId(cobrancaId);
+        setView('shipment-report');
+    };
+
     const renderView = () => {
         switch (view) {
             case 'dashboard': return <DashboardView cobrancas={cobrancas} clientes={clientes} />;
             case 'clients': return <ClientManagementView clientes={clientes} onUpdate={fetchData} />;
             case 'billing': return <InvoiceGenerationView clientes={clientes} tabelaPrecos={tabelaPrecos} settings={settings} onUpdate={fetchData} />;
-            case 'archive': return <BillingArchiveView cobrancas={cobrancas} clientes={clientes} tabelaPrecos={tabelaPrecos} settings={settings} onUpdate={fetchData} />;
+            case 'archive': return <BillingArchiveView cobrancas={cobrancas} clientes={clientes} tabelaPrecos={tabelaPrecos} settings={settings} onUpdate={fetchData} onOpenShipmentReport={handleOpenShipmentReport} />;
+            case 'shipment-report': return <ShipmentReportGeneratorView cobrancas={cobrancas} clientes={clientes} tabelaPrecos={tabelaPrecos} selectedCobrancaId={selectedShipmentReportCobrancaId} onUpdate={fetchData} />;
             case 'settings': return <SettingsView tabelaPrecos={tabelaPrecos} onUpdate={fetchData} />;
             case 'templates': return <TemplatesView />;
             case 'general-settings': return <GeneralSettingsView adminUser={adminUser} settings={settings} onUpdate={onDataUpdate} />;
@@ -103,6 +112,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminUser, settings, fa
                          <NavItem viewName="templates" label="Templates e Imports" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" /></svg>} />
                          <NavItem viewName="billing" label="Gerar Nova Cobrança" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4 2a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2V4a2 2 0 00-2-2H4zm1 4a1 1 0 000 2h10a1 1 0 100-2H5zm0 4a1 1 0 100 2h10a1 1 0 100-2H5z" clipRule="evenodd" /></svg>} />
                          <NavItem viewName="archive" label="Arquivo de Cobranças" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M4 3a2 2 0 100 4h12a2 2 0 100-4H4z" /><path fillRule="evenodd" d="M3 8h14v7a2 2 0 01-2 2H5a2 2 0 01-2-2V8zm5 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" clipRule="evenodd" /></svg>} />
+                         <NavItem viewName="shipment-report" label="Relatório de Envios" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5 4a3 3 0 00-3 3v6a3 3 0 003 3h10a3 3 0 003-3V7a3 3 0 00-3-3H5zm-1 9v-1h5v1H4zm7 0v-1h5v1h-5zm-7-3V9h5v1H4zm7 0V9h5v1h-5zm-7-3V6h5v1H4zm7 0V6h5v1h-5z" clipRule="evenodd" /></svg>} />
                          <NavItem viewName="settings" label="Tabela de Preços" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01-.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" /></svg>} />
                          <NavItem viewName="client-price-tables" label="Tabelas por Cliente" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" /><path fillRule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clipRule="evenodd" /></svg>} />
                          <NavItem viewName="faq" label="Gestão de FAQ" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" /></svg>} />
